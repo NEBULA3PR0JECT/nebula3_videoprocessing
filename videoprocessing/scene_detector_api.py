@@ -72,6 +72,26 @@ class NEBULA_SCENE_DETECTOR():
                            f'frame{num:04}.jpg'), frame)
         return frames
 
+    def store_frames_to_s3(self, movie_id, frames_folder, video_file):
+        bucket_name = "nebula-frames"
+        folder_name = movie_id
+        self.s3.put_object(Bucket=bucket_name, Key=(folder_name+'/'))
+        print(frames_folder)
+        if not os.path.exists(frames_folder):
+            os.mkdir(frames_folder)
+        else:
+            for f in os.listdir(frames_folder):
+                if os.path.isfile(os.path.join(frames_folder, f)):
+                    os.remove(os.path.join(frames_folder, f))
+        num_frames = self.divide_movie_into_frames(video_file, frames_folder)
+        # SAVE TO REDIS - TBD
+        if num_frames > 0:
+            for k in range(num_frames):
+                img_name = os.path.join(
+                    frames_folder, f'frame{k:04}.jpg')
+                self.s3.upload_file(img_name, bucket_name, folder_name +
+                            '/' + f'frame{k:04}.jpg')
+
     def get_video_metadata(self, video_file):
         """
         Input: video
