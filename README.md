@@ -4,7 +4,11 @@ Tools for videoprocessing of NEBULA3.
 # How to use:
 a. `git clone https://github.com/NEBULA3PR0JECT/nebula3_videoprocessing.git`
 
-b. `conda activate videoprocessing`
+b. `cd nebula3_videoprocessing`
+
+c. `conda env create --name videoprocessing --file=environment.yml`
+
+d. `conda activate videoprocessing`
 
 
 # What this repo includes (currently):

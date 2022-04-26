@@ -11,7 +11,7 @@ import cv2
 import os
 import logging
 import uuid
-from arango import ArangoClient
+# from arango import ArangoClient
 from benchmark.clip_benchmark import NebulaVideoEvaluation
 import numpy as np
 import glob
@@ -28,6 +28,8 @@ class NEBULA_SCENE_DETECTOR():
                             level=logging.INFO)
         self.video_eval = NebulaVideoEvaluation()
         self.nre = MOVIE_DB()
+        print("Changing database to ilan_test.")
+        self.nre.change_db("ilan_test") 
         self.db = self.nre.db
         self.s3 = boto3.client('s3', region_name='eu-central-1')
 
@@ -189,36 +191,30 @@ class NEBULA_SCENE_DETECTOR():
     # url - url to S3
     # last_frame - number of frames in movie
     # metadata - available metadata - fps, resolution....
-    def insert_movie(self, file_name, movie_name, tags, full_path, url, last_frame, status):
+    def insert_movie(self, full_path, url, source):
         movie_id = uuid.uuid4().hex
-        query = 'UPSERT { movie_name: @movie_name} INSERT  \
-            { movie_id: @movie_id, file_name: @file_name, movie_name: @movie_name, description: @description, tags: @tags,\
-                full_path: @full_path, url_path: @url, last_frame: @last_frame,\
+        query = 'UPSERT { File: @File} INSERT  \
+            { File: @File, \
+                url_path: @url, \
                 scenes: @scenes, scene_elements: @scene_elements, mdfs: @mdfs, meta: @metadata,\
-                    last_frame: @last_frame, scenes: @scenes, scene_elements: @scene_elements, mdfs: @mdfs, updates: 1, \
-                         status: "created"\
+                     scenes: @scenes, scene_elements: @scene_elements, mdfs: @mdfs, updates: 1, \
+                         source: "lsmdc"\
                     } UPDATE \
-                { updates: OLD.updates + 1, file_name: @file_name, description: @description, tags: @tags,\
-                full_path: @full_path, url_path: @url, last_frame: @last_frame,\
-                scenes: @scenes, scene_elements: @scene_elements, mdfs: @mdfs, meta: @metadata, status: @status, \
-                    last_frame: @last_frame, scenes: @scenes, scene_elements: @scene_elements, mdfs: @mdfs \
+                { updates: OLD.updates + 1, \
+                File: @File, url_path: @url, \
+                scenes: @scenes, scene_elements: @scene_elements, mdfs: @mdfs, meta: @metadata, source: @source, \
+                     scenes: @scenes, scene_elements: @scene_elements, mdfs: @mdfs \
                 } IN Movies \
                     RETURN { doc: NEW, type: OLD ? \'update\' : \'insert\' }'
         scene_elements = self.detect_scene_elements(full_path)
         bind_vars = {
-                        'movie_id': movie_id,
-                        'file_name': file_name,
-                        'movie_name': movie_name,
-                        'description': movie_name,
-                        'tags': tags,
-                        'full_path': full_path,
+                        'File': full_path,
                         'url': url,
-                        'last_frame': last_frame,
                         'scenes': self.detect_scenes(full_path),
                         'scene_elements': scene_elements,
                         'mdfs': self.detect_mdf(full_path, scene_elements),
                         'metadata': self.get_video_metadata(full_path),
-                        'status': status
+                        'source': "lsmdc_concatenated"
                         }
         print(bind_vars)
         cursor = self.db.aql.execute(query, bind_vars=bind_vars)
@@ -276,13 +272,19 @@ def main():
     # scene_detector.new_movies_batch_processing()
 
     #scene_detector.init_new_db("nebula_datadriven")
-    # _files = glob.glob('/movies/*avi')
-    # #Example usage
-    # for _file in _files:
-    #     file_name = basename(_file)
-    #     movie_mame = file_name.split(".avi")[0]
-    #     scene_detector.insert_movie(file_name, movie_mame, ["hollywood", "pegasus", "visual genome"],
-    #     _file,"static/datadriven/" + file_name, 300)
+    movies_path = "/dataset1/0001_American_Beauty/"
+    mp4_path = "dataset1/concatenated_mp4_50/"
+    _files = [f for f in os.listdir(movies_path) if f.endswith(".avi") or f.endswith(".mp4")]
+    prefix_link = "http://ec2-18-159-140-240.eu-central-1.compute.amazonaws.com:7000/static/"
+    source = "lsmdc_concatenated"
+    #Example usage
+    for _file in _files:
+        file_name = basename(_file)
+        movie_name = file_name.split(".avi")[0].replace(".", "_")
+        url_link = os.path.join(os.path.join(prefix_link, mp4_path), movie_name + ".mp4")
+        full_path = os.path.join(movies_path, movie_name + ".avi")
+        scene_detector.insert_movie(full_path, url_link, source)
+        scene_detector.convert_avi_to_mp4(full_path, os.path.join(mp4_path, movie_name))
 if __name__ == "__main__":
     main()
 
