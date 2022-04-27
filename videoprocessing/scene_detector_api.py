@@ -17,6 +17,8 @@ import numpy as np
 import glob
 #import redis
 import boto3
+import csv
+import json
 import sys
 sys.path.insert(0, './')
 sys.path.insert(0, 'nebula3_database/')
@@ -50,7 +52,7 @@ class NEBULA_SCENE_DETECTOR():
             start_frame = scene[0].get_frames()
             stop_frame = scene[1].get_frames()
             scenes.append([start_frame,stop_frame])
-        print("Scenes: ", scenes)
+        print("Scenes elements: ", scenes)
         return(scenes)
 
     def divide_movie_into_frames(self, movie_in_path, movie_out_folder, save_frames=False):
@@ -135,7 +137,7 @@ class NEBULA_SCENE_DETECTOR():
         :param method: '3frames' - choose three good frames, 'clip_segment' - use clip segmentation to choose 3 MDFs
         :return:
         """
-        print("TODO")
+        print("Detecting MDFs..")
         if method == '3frames':
             mdfs = []
             for scene_element in scene_elements:
@@ -192,13 +194,12 @@ class NEBULA_SCENE_DETECTOR():
     # last_frame - number of frames in movie
     # metadata - available metadata - fps, resolution....
     def insert_movie(self, full_path, url, source):
-        movie_id = uuid.uuid4().hex
         query = 'UPSERT { File: @File} INSERT  \
             { File: @File, \
                 url_path: @url, \
                 scenes: @scenes, scene_elements: @scene_elements, mdfs: @mdfs, meta: @metadata,\
                      scenes: @scenes, scene_elements: @scene_elements, mdfs: @mdfs, updates: 1, \
-                         source: "lsmdc"\
+                         source: "lsmdc_concatenated"\
                     } UPDATE \
                 { updates: OLD.updates + 1, \
                 File: @File, url_path: @url, \
@@ -214,7 +215,7 @@ class NEBULA_SCENE_DETECTOR():
                         'scene_elements': scene_elements,
                         'mdfs': self.detect_mdf(full_path, scene_elements),
                         'metadata': self.get_video_metadata(full_path),
-                        'source': "lsmdc_concatenated"
+                        'source': source
                         }
         print(bind_vars)
         cursor = self.db.aql.execute(query, bind_vars=bind_vars)
@@ -259,32 +260,341 @@ class NEBULA_SCENE_DETECTOR():
                 frames.append(resized_frame)
         return frames
 
+    def preprocess_dataset(self, dataset_path, db_type="COMET"):
+        """
+        Preprocess LSMDC & VSCOMET datasets to dictionaries
+        """    
+        new_db = []
+        if db_type == "COMET":
+            test_json = open(dataset_path)
+            data = json.load(test_json)
+            for idx, key in enumerate(data):
+                if "lsmdc" in key['img_fn']:
+                    new_key = self.get_frame_dict(key)
+                    new_db.append(new_key)
 
+        elif db_type == "LSMDC":
+            with open(dataset_path) as csv_file:
+                csv_reader = csv.reader(csv_file, delimiter=',')
+                for row in csv_reader:
+                    key = row[0].split()[0]
+                    txt = ''
+                    if len(row) > 1:
+                        txt = row[1]
+                    new_db.append({'clip_id': key, 'txt': txt})
+            return new_db
+        else: #db_type is LSMDC
+            print("Unknown DB-TYPE")
 
+        return new_db
+    
+    def time2secs(self, ts):
+        hh, mm, ss, ms = ts.split(".")
+        return int(hh)*3600 + int(mm)*60 + int(ss) + (float(ms) / 1000000)
+    
+    def get_gt_clips(self, path):
+        output = []
+        with open(path) as fp:
+            lines = fp.readlines()
+            cnt = 1
+            for line in lines:
+                output.append(line.rstrip("\n"))
+        return output
 
+    def divide_to_parts(self, dataset, clip_time=20, only_gt_clips=False):
+        """
+         Divide movies to 20 second clips. (With holes)
+         If `only_gt_clips=True`, then we take the 44 ground-truth clips only.
+        """
+        new_dataset = [[]]
+        time_ctr = clip_time
+        new_dataset_idx = 0
+        start_merging = False
+        counter = 0
+        if only_gt_clips:
+            # clip_names = self.get_playground_movies()
+            clips_gt_list_path = "./utils/44_clips_list.txt"
+            clip_names = self.get_gt_clips(clips_gt_list_path)
+            start_merging = False
+        for i in range(1, len(dataset)):
+            cur_clip = dataset[i]
+            clip_id = cur_clip['clip_id']
+            # If this is true, we'll process only 44 clips instead of all the clips.
+            if only_gt_clips and not start_merging:
+                if clip_id.replace(".","_") not in clip_names:
+                    continue
+                else:
+                    start_merging = True
+                    time_ctr = clip_time
+                    counter += 1
+                    print(clip_id.replace(".","_"))
+            ts_start, ts_end = clip_id.split("_")[-1].split("-")
+            ts_start, ts_end = self.time2secs(ts_start), self.time2secs(ts_end)
+            clip_length = ts_end - ts_start
+
+            # clip is over `clip_time=20seconds`, add it alone
+            if clip_length > clip_time:
+                new_dataset[new_dataset_idx].append(cur_clip)
+                time_ctr = clip_time
+                new_dataset.append([])
+                new_dataset_idx += 1
+                if start_merging:
+                    start_merging = False
+                continue
+
+            # clip is less than 20 seconds, we add it to new list that can contain
+            # more clips in that list.
+            if time_ctr - clip_length > 0:
+                new_dataset[new_dataset_idx].append(cur_clip)
+                time_ctr -= clip_length
+                continue
+            
+            # If we add a clip that exceeds `time_ctr` of current list of clips
+            # we add it to a new list.
+            if time_ctr - clip_length <= 0:
+                if start_merging:
+                    start_merging = False
+                    time_ctr = clip_time
+                    new_dataset_idx += 1
+                    new_dataset.append([])
+                    continue
+                new_dataset.append([])
+                new_dataset_idx += 1
+                new_dataset[new_dataset_idx].append(cur_clip)
+                time_ctr = clip_time
+                # If the added clip has bigger value then clip_time, we create new level
+                if clip_length > clip_time:
+                    new_dataset.append([])
+                    new_dataset_idx += 1
+                # just substract clip_length in the new level.
+                else:
+                    time_ctr -= clip_length
+                continue
+        print(counter)
+        # Sometimes the last element in the list is empty, so we remove i
+        if not new_dataset[-1]:
+            return new_dataset[:-1]
+        return new_dataset
+
+    def remove_holes_in_concatenated_clips(self, dataset, delta_error=1):
+        """
+         There are clips that we concatenate that are not sequential.
+         For e.g. if clip starts at 00:01:00 and ends at 00:01:20, the next clip,
+         should start at approximately 00:01:20 as well, if it starts at 00:02:00 it's bad,
+         so we will skip it.
+         `delta_error`: maximum time allowed (in seconds) between end of clip and start of new one.
+        """
+        new_dataset = []
+        for data in dataset:
+            time_stamps = []
+            for i in range(len(data)):
+                 ts_start, ts_end = data[i]['clip_id'].split("_")[-1].split("-")
+                 ts_start, ts_end = self.time2secs(ts_start), self.time2secs(ts_end)
+                 time_stamps.append([ts_start, ts_end])
+
+            if len(time_stamps) == 1:
+                new_dataset.append(data)
+                ts_start, ts_end = data[0]['clip_id'].split("_")[-1].split("-")
+                ts_start, ts_end = self.time2secs(ts_start), self.time2secs(ts_end)
+                length = ts_end - ts_start
+                print("-"*30)
+                print(f"Movie Name: {data[0]['clip_id']}")
+                print(f"Length: {length}")
+            else:
+                length = 0
+                for i in range(len(time_stamps) - 1):
+                    delta = time_stamps[i + 1][0] - time_stamps[i][1]
+                    if delta > delta_error:
+                        position = i
+                        break
+                if position != 0:
+                    new_dataset.append(data[:position + 1])
+                
+                for i in range(len(data[:position + 1])):
+                     ts_start, ts_end = data[i]['clip_id'].split("_")[-1].split("-")
+                     ts_start, ts_end = self.time2secs(ts_start), self.time2secs(ts_end)
+                     length += ts_end - ts_start
+                if position != 0:
+                    print("-"*30)
+                    print(f"Movie Name: {data[0]['clip_id']}")
+                    print(f"Length: {length}")
+        print(f"Length of dataset: {len(new_dataset)}")
+        return new_dataset
+
+    def split_modified(self, strng, sep, pos):
+        """
+        There're movies like Spider-man...timestamp-timestamp..
+        I want to split only by the last "-"
+        """
+        strng = strng.split(sep)
+        return sep.join(strng[:pos]), sep.join(strng[pos:])
+
+    def check_if_merged_mp4_exists(self, path, movie_names):
+        """
+        For debugging purposes. Skipping merged .mp4 files.
+        """
+        from natsort import natsorted
+        if not movie_names:
+            return
+        files = natsorted(movie_names)
+        # Beginning timestamp of first clip, and end timestamp of last clip.
+        prefix_str = self.split_modified(files[0].split("/")[-1], "-", -1)[0]
+        unique_clip_name = prefix_str + "-" + \
+                            files[-1].split("/")[-1].split("-")[-1].replace(".avi", ".mp4")
+        if unique_clip_name in os.listdir(path):
+            print(f"Merged clip {unique_clip_name} already exists! Skipping...")
+            return True
+        return False
+
+    def process_specific_avi_to_mp4(self, upload_dir, storage_dir, clips_names = ['']):
+        """
+        Convert LSMDC .avi clips to .mp4 clips.
+        If `clips_names` is [''] we return.
+        Otherwise, we iterate only over the `clips_names` list.
+        """
+        print("Processing .avi files.")
+        if clips_names != ['']:
+            print(f"We iterate only over {clips_names}")
+        else:
+            print("Error! `clip_names` is empty.")
+            return
+        # Check if .mp4 and doesn't exist. Otherwise, we proceed and convert .avi to .mp4
+        for clip in clips_names:
+            if clip.replace(".avi",".mp4") in os.listdir(storage_dir):
+                print("Skipping. Found at least one clip in folder.")
+                return
+        # check if merged .mp4 doesn't exist.
+        if self.check_if_merged_mp4_exists(storage_dir, clips_names):
+            print("Skipping. Found the merged .mp4 in folder.")
+            return
+            
+        _dirs = glob.glob(upload_dir + '/*')
+        movies_output = []
+        counter = 0
+        length_clips = len(clips_names)
+        for _dir in _dirs:
+            _files = glob.glob(_dir + '/*')
+            for _file in _files:
+                file_name = basename(_file)
+                movie_name = file_name
+                if movie_name in clips_names:
+                    self.convert_avi_to_mp4(_file , storage_dir + "/" + movie_name.replace(".avi",""))
+                    movies_output.append(storage_dir + "/" + movie_name.replace(".avi",".mp4"))
+        return movies_output
+    
+    def merge_multiple_mp4_to_one(self, path, movie_names):
+        from moviepy.editor import VideoFileClip, concatenate_videoclips
+        import os
+        from natsort import natsorted
+        # check if merged .mp4 doesn't exist.
+        if not movie_names:
+            print("Skipping. no `movie_names`.")
+            return
+        if len(movie_names) == 1:
+            print(f"Skipping. We have only one {movie_names} .mp4 file, so we don't need to merge it.")
+            return
+        print("Merging mp4 clips to one mp4 clip..")
+        L =[]
+        _files = [os.path.join(path, f) for f in os.listdir(path) if f.replace(".mp4",".avi") in movie_names]
+        files = natsorted(_files)
+        # Beginning timestamp of first clip, and end timestamp of last clip.
+        prefix_str = self.split_modified(files[0].split("/")[-1], "-", -1)[0]
+        unique_clip_name = prefix_str + "-" + \
+                            files[-1].split("/")[-1].split("-")[-1]
+        if unique_clip_name in path:
+            print(f"Merged clip {unique_clip_name} already exists! Skipping...")
+        for file in files:
+            if file != unique_clip_name:
+                if os.path.splitext(file)[1] == '.mp4':
+                    filePath = os.path.join(path, file)
+                    video = VideoFileClip(filePath)
+                    L.append(video)
+
+        final_clip = concatenate_videoclips(L)
+        final_clip.to_videofile(os.path.join(path,unique_clip_name), fps=24, remove_temp=False)
+        print(f"Done merge the clips! Merged file: {os.path.join(path,unique_clip_name)}")
+        prefix_link = "http://ec2-18-159-140-240.eu-central-1.compute.amazonaws.com:7000/static/"
+        print(f"Can be access in: {os.path.join(os.path.join(prefix_link, path) ,unique_clip_name)}")
+
+    def concat_mp4(self, clips_dict, base_path = "/dataset1/", dest_path = "/dataset1/concatenated_mp4_50"):
+        """
+        Merging multiple mp4 files into one mp4 files.
+        1. Take the relevant .avi files.
+        2. Convert them to .mp4 files and save them.
+        3. Merge these files to one output mp4 file.
+        """
+        for ctr, clips in enumerate(clips_dict):
+            # 1. Take the relevant .avi files.
+            clip_names = [clip['clip_id']+".avi" for clip in clips]
+            # 2. Convert them to .mp4 files and save them.
+            movies_output = self.process_specific_avi_to_mp4(base_path, dest_path, clip_names)
+            # 3. Merge these files to one output mp4 file.
+            if movies_output:
+                self.merge_multiple_mp4_to_one(dest_path, clip_names)
+            print(f"Finished {ctr+1}/{len(clips_dict)} clips.")
+            
+            print("Removing all the merged .mp4 files and moving to next clip.")
+            clips_to_del = [clip['clip_id']+".mp4" for clip in clips]
+            if len(clips_to_del) > 1: # If it's one clip, it's also the .merged one so we skip it
+                for clip_to_del in clips_to_del:
+                    ## If file exists, delete it. 
+                    clip_name = os.path.join(dest_path, clip_to_del)
+                    if os.path.isfile(clip_name) and ".mp4" in clip_name:
+                        os.remove(clip_name)
+                    else:
+                        print("Error: %s file not found" % clip_name)
+
+    def create_concat_lsmdc_movies(self, lsmdc_dir, num_of_movies=55):
+
+        # Paths to LSMDC .JSONs
+        lsmdc_train_path = os.path.join(lsmdc_dir, "LSMDC16_annos_training.csv")
+        lsmdc_val_path = os.path.join(lsmdc_dir, "LSMDC16_annos_val.csv")
+        lsmdc_test_path = os.path.join(lsmdc_dir, "LSMDC16_annos_test.csv")
+
+        # Process LSMDC annotation files
+        lsmdc_train_dict = self.preprocess_dataset(lsmdc_train_path, "LSMDC")
+        lsmdc_val_dict = self.preprocess_dataset(lsmdc_val_path, "LSMDC")
+        lsmdc_test_dict = self.preprocess_dataset(lsmdc_test_path, "LSMDC")
+
+        # Divide LSMDC annotation files with holes.
+        lsmdc_train_dict_merged = self.divide_to_parts(lsmdc_train_dict, clip_time=20, only_gt_clips=False)
+        # lsmdc_val_dict_merged = self.divide_to_parts(lsmdc_val_dict, clip_time=20, only_gt_clips=False)
+        # lsmdc_test_dict_merged = self.divide_to_parts(lsmdc_test_dict, clip_time=20, only_gt_clips=False)
+
+        # Divide LSMDC annotation files without holes.
+        lsmdc_train_dict_merged = self.remove_holes_in_concatenated_clips(lsmdc_train_dict_merged)
+        # lsmdc_val_dict_merged = self.remove_holes_in_concatenated_clips(lsmdc_val_dict_merged)
+        # lsmdc_test_dict_merged = self.remove_holes_in_concatenated_clips(lsmdc_test_dict_merged)
+
+        self.concat_mp4(lsmdc_train_dict_merged[:num_of_movies], base_path = "/dataset1/", dest_path = "/dataset1/concatenated_mp4_50")
 
 
 def main():
     scene_detector = NEBULA_SCENE_DETECTOR()
+
+    concate_movies = False
+    # We concatenate 50 movies of LSMDC
+    if concate_movies:
+        lsmdc_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "dataset1/lsmdc/")
+        scene_detector.create_concat_lsmdc_movies(lsmdc_dir=lsmdc_path, num_of_movies=50)
+
     # path = '/dataset/development/1010_TITANIC_00_41_32_072-00_41_40_196.mp4'
     # scene_detector.divide_movie_by_timestamp(path, 3, 4)
 
     # scene_detector.new_movies_batch_processing()
 
     #scene_detector.init_new_db("nebula_datadriven")
-    movies_path = "/dataset1/0001_American_Beauty/"
-    mp4_path = "dataset1/concatenated_mp4_50/"
-    _files = [f for f in os.listdir(movies_path) if f.endswith(".avi") or f.endswith(".mp4")]
-    prefix_link = "http://ec2-18-159-140-240.eu-central-1.compute.amazonaws.com:7000/static/"
+    mp4_path = "/dataset1/concatenated_mp4_50/"
+    _files = [f for f in os.listdir(mp4_path) if f.endswith(".mp4")]
+    prefix_link = "http://ec2-18-159-140-240.eu-central-1.compute.amazonaws.com:7000/static"
     source = "lsmdc_concatenated"
     #Example usage
     for _file in _files:
         file_name = basename(_file)
-        movie_name = file_name.split(".avi")[0].replace(".", "_")
-        url_link = os.path.join(os.path.join(prefix_link, mp4_path), movie_name + ".mp4")
-        full_path = os.path.join(movies_path, movie_name + ".avi")
+        movie_name = file_name.split(".mp4")[0]
+        url_link = os.path.join(prefix_link+mp4_path, movie_name + ".mp4")
+        full_path = os.path.join(mp4_path, movie_name + ".mp4")
         scene_detector.insert_movie(full_path, url_link, source)
-        scene_detector.convert_avi_to_mp4(full_path, os.path.join(mp4_path, movie_name))
 if __name__ == "__main__":
     main()
 
