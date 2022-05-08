@@ -22,16 +22,17 @@ import json
 import sys
 sys.path.insert(0, './')
 sys.path.insert(0, 'nebula3_database/')
+import torch
+from PIL import Image
 from nebula3_database.movie_db import MOVIE_DB
+import clip
 
 class NEBULA_SCENE_DETECTOR():
     def __init__(self):
         logging.basicConfig(format='%(asctime)s - %(message)s',
                             level=logging.INFO)
         self.video_eval = NebulaVideoEvaluation()
-        self.nre = MOVIE_DB()
-        print("Changing database to ilan_test.")
-        self.nre.change_db("ilan_test") 
+        self.nre = MOVIE_DB() 
         self.db = self.nre.db
         self.s3 = boto3.client('s3', region_name='eu-central-1')
 
@@ -180,6 +181,50 @@ class NEBULA_SCENE_DETECTOR():
         return(mdfs)
 
 
+    def save_mdfs_to_jpg(self, full_path, mdfs, save_path="/dataset/lsmdc/mdfs_of_20_clips/"):
+        vidcap = cv2.VideoCapture(full_path)
+        success, image = vidcap.read()
+        count = 0
+        counted_mdfs = 0
+        if ".mp4" in full_path:
+            full_path_modified = full_path.split("/")[-1].replace(".mp4","")
+        if ".avi" in full_path:
+            full_path_modified = full_path.split("/")[-1].replace(".avi","")  
+        while success:
+            success, image = vidcap.read()
+            if count in mdfs:
+                cv2.imwrite(f"{save_path}{full_path_modified}__{count}.jpg", image)     # save frame as JPEG file      
+                print('Read a new frame: ', success)
+                counted_mdfs += 1
+            if counted_mdfs == len(mdfs):
+                print("Done")
+                return
+            count += 1
+            # exit of infinite loop
+            if count > 9999:
+                return
+
+    def generate_captions_on_mdfs(self, images, mdfs_path, prefix_link = "http://ec2-18-159-140-240.eu-central-1.compute.amazonaws.com:7000/static/dataset1/mdfs/"):
+        from clipcap import ClipCap
+        device = torch.device("cuda:0" if torch.cuda.is_available() else 'cpu')
+        model, preprocess = clip.load("ViT-B/32", device=device)
+        clip_cap = ClipCap()
+        mdfs_path = "/dataset/lsmdc/mdfs_of_20_clips/"
+        images = [os.path.join(mdfs_path, image) for image in os.listdir(mdfs_path)]
+        output_dict = {}
+        for img_path in images:
+            frame = cv2.imread(img_path)
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            img = preprocess(Image.fromarray(frame)).unsqueeze(0).to(device)
+            embedding = model.encode_image(img)
+            output = clip_cap.generate_text(embedding, use_beam_search=False)
+            image_name = img_path.split("/")[-1]
+            print("Input:")
+            print(image_name)
+            link_path = os.path.join(prefix_link, image_name)
+            print(f"Link: {link_path}")
+            print("Output")
+
 
     def convert_avi_to_mp4(self, avi_file_path, output_name):
         os.system("ffmpeg -y -i '{input}' -ac 2 -b:v 2000k -c:a aac -c:v libx264 -b:a 160k -vprofile high -bf 0 -strict experimental -f mp4 '{output}.mp4'".format(
@@ -193,7 +238,9 @@ class NEBULA_SCENE_DETECTOR():
     # url - url to S3
     # last_frame - number of frames in movie
     # metadata - available metadata - fps, resolution....
-    def insert_movie(self, full_path, url, source):
+    def insert_movie(self, full_path, url, source, db_name="ilan_test"):
+        print("Changing database to {}.".format(db_name))
+        self.nre.change_db(db_name)
         query = 'UPSERT { File: @File} INSERT  \
             { File: @File, \
                 url_path: @url, \
@@ -205,16 +252,65 @@ class NEBULA_SCENE_DETECTOR():
                 File: @File, url_path: @url, \
                 scenes: @scenes, scene_elements: @scene_elements, mdfs: @mdfs, meta: @metadata, source: @source, \
                      scenes: @scenes, scene_elements: @scene_elements, mdfs: @mdfs \
-                } IN Movies \
+                } IN Movies_v2 \
                     RETURN { doc: NEW, type: OLD ? \'update\' : \'insert\' }'
         scene_elements = self.detect_scene_elements(full_path)
+        mdfs = self.detect_mdf(full_path, scene_elements)
+        mdf_outputs = []
+        for mdf in mdfs:
+            self.save_mdfs_to_jpg(full_path, mdf, save_path="/dataset/lsmdc/mdfs_of_20_clips/")
+            generate_captions_on_mdfs()
+        scenes = self.detect_scenes(full_path)
+        metadata = self.get_video_metadata(full_path)
         bind_vars = {
                         'File': full_path,
                         'url': url,
-                        'scenes': self.detect_scenes(full_path),
+                        'scenes': scenes,
                         'scene_elements': scene_elements,
-                        'mdfs': self.detect_mdf(full_path, scene_elements),
-                        'metadata': self.get_video_metadata(full_path),
+                        'mdfs': mdfs,
+                        'metadata': metadata,
+                        'source': source
+                        }
+        print(bind_vars)
+        cursor = self.db.aql.execute(query, bind_vars=bind_vars)
+        for doc in cursor:
+            doc=doc
+        return(doc['doc']['_id'])
+
+    def get_movie_id_from_url(self, url):
+        movie_id = url.split("/")[-1].replace(".","_")
+        if "_mp4" in movie_id:
+            return movie_id.replace("_mp4", "")
+        elif "_avi" in movie_id:
+            return movie_id.replace("_avi", "")
+        else:
+            raise Exception("Unknown video format. Please use mp4/avi")
+
+    def insert_movie_sprint_2(self, full_path, url, concat_url, source, db_name="ilan_test"):
+        print("Changing database to {}.".format(db_name))
+        self.nre.change_db(db_name)
+        query = 'UPSERT { File: @File} INSERT  \
+        { File: @File, \
+            url_path: @url, \
+            scenes: @scenes, scene_elements: @scene_elements, mdfs: @mdfs, meta: @metadata,\
+                    scenes: @scenes, scene_elements: @scene_elements, mdfs: @mdfs, updates: 1, \
+                        source: "lsmdc_concatenated"\
+                } UPDATE \
+            { updates: OLD.updates + 1, \
+            File: @File, url_path: @url, \
+            scenes: @scenes, scene_elements: @scene_elements, mdfs: @mdfs, meta: @metadata, source: @source, \
+                    scenes: @scenes, scene_elements: @scene_elements, mdfs: @mdfs \
+            } IN sprint2_lsmdc \
+                RETURN { doc: NEW, type: OLD ? \'update\' : \'insert\' }'
+        scene_element = self.detect_scenes(full_path)
+        mdfs = self.detect_mdf(full_path, scene_element)
+        movie_id = self.get_movie_id_from_url(url)
+        bind_vars = {
+                        'File': full_path,
+                        'movie_id': movie_id,
+                        'clip_url': url,
+                        'concatenated_url': concat_url,
+                        'mdfs': mdfs,
                         'source': source
                         }
         print(bind_vars)
@@ -397,9 +493,9 @@ class NEBULA_SCENE_DETECTOR():
                 ts_start, ts_end = data[0]['clip_id'].split("_")[-1].split("-")
                 ts_start, ts_end = self.time2secs(ts_start), self.time2secs(ts_end)
                 length = ts_end - ts_start
-                print("-"*30)
-                print(f"Movie Name: {data[0]['clip_id']}")
-                print(f"Length: {length}")
+                # print("-"*30)
+                # print(f"Movie Name: {data[0]['clip_id']}")
+                # print(f"Length: {length}")
             else:
                 length = 0
                 for i in range(len(time_stamps) - 1):
@@ -419,6 +515,9 @@ class NEBULA_SCENE_DETECTOR():
                     print(f"Movie Name: {data[0]['clip_id']}")
                     print(f"Length: {length}")
         print(f"Length of dataset: {len(new_dataset)}")
+
+        # Sort the database by the length in a descending order, therefore we will get the longest videos w/o holes.
+        new_dataset.sort(key=len, reverse=True)
         return new_dataset
 
     def split_modified(self, strng, sep, pos):
@@ -516,6 +615,7 @@ class NEBULA_SCENE_DETECTOR():
         prefix_link = "http://ec2-18-159-140-240.eu-central-1.compute.amazonaws.com:7000/static/"
         print(f"Can be access in: {os.path.join(os.path.join(prefix_link, path) ,unique_clip_name)}")
 
+
     def concat_mp4(self, clips_dict, base_path = "/dataset1/", dest_path = "/dataset1/concatenated_mp4_50"):
         """
         Merging multiple mp4 files into one mp4 files.
@@ -544,7 +644,7 @@ class NEBULA_SCENE_DETECTOR():
                     else:
                         print("Error: %s file not found" % clip_name)
 
-    def create_concat_lsmdc_movies(self, lsmdc_dir, num_of_movies=55):
+    def create_concat_lsmdc_movies(self, lsmdc_dir, num_of_movies=55, base_path = "/dataset1/", dest_path = "/dataset1/concatenated_mp4_20"):
 
         # Paths to LSMDC .JSONs
         lsmdc_train_path = os.path.join(lsmdc_dir, "LSMDC16_annos_training.csv")
@@ -566,17 +666,17 @@ class NEBULA_SCENE_DETECTOR():
         # lsmdc_val_dict_merged = self.remove_holes_in_concatenated_clips(lsmdc_val_dict_merged)
         # lsmdc_test_dict_merged = self.remove_holes_in_concatenated_clips(lsmdc_test_dict_merged)
 
-        self.concat_mp4(lsmdc_train_dict_merged[:num_of_movies], base_path = "/dataset1/", dest_path = "/dataset1/concatenated_mp4_50")
+        self.concat_mp4(lsmdc_train_dict_merged[:num_of_movies], base_path, dest_path)
 
 
 def main():
     scene_detector = NEBULA_SCENE_DETECTOR()
 
     concate_movies = False
-    # We concatenate 50 movies of LSMDC
+    # We concatenate 20 movies of LSMDC
     if concate_movies:
         lsmdc_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "dataset1/lsmdc/")
-        scene_detector.create_concat_lsmdc_movies(lsmdc_dir=lsmdc_path, num_of_movies=50)
+        scene_detector.create_concat_lsmdc_movies(lsmdc_dir=lsmdc_path, num_of_movies=20, base_path = "/dataset1/", dest_path = "/dataset1/concatenated_mp4_20")
 
     # path = '/dataset/development/1010_TITANIC_00_41_32_072-00_41_40_196.mp4'
     # scene_detector.divide_movie_by_timestamp(path, 3, 4)
@@ -584,7 +684,9 @@ def main():
     # scene_detector.new_movies_batch_processing()
 
     #scene_detector.init_new_db("nebula_datadriven")
-    mp4_path = "/dataset1/concatenated_mp4_50/"
+
+    # INSERT concatenated movies to database
+    mp4_path = "/dataset1/concatenated_mp4_55/"
     _files = [f for f in os.listdir(mp4_path) if f.endswith(".mp4")]
     prefix_link = "http://ec2-18-159-140-240.eu-central-1.compute.amazonaws.com:7000/static"
     source = "lsmdc_concatenated"

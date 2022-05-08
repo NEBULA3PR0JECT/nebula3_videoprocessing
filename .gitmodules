@@ -1,3 +1,6 @@
 [submodule "nebula3_database"]
 	path = nebula3_database
 	url = https://github.com/NEBULA3PR0JECT/nebula3_database.git
+[submodule "nebula3_vlm"]
+	path = nebula3_vlm
+	url = https://github.com/NEBULA3PR0JECT/nebula3_vlm.git
