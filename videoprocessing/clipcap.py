@@ -212,10 +212,11 @@ class ClipCap:
     def __init__(self, is_coco=True):
         self.tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
         self.prefix_length = 10
+        weights_path = os.path.join(os.path.abspath(os.path.dirname(__file__)),"clipcap_weights")
         if is_coco:
-            self.model_path = '/home/ilan/git/NEBULA2-latest/NEBULA2/pipeline/weights/coco_weights.pt'
+            self.model_path = os.path.join(weights_path,'coco_weights.pt')
         else:
-            self.model_path = '/home/ilan/git/NEBULA2-latest/NEBULA2/pipeline/weights/conceptual_weights.pt'
+            self.model_path = os.path.join(weights_path,'conceptual_weights.pt')
 
         self.model = ClipCaptionModel(self.prefix_length)
 
