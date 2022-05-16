@@ -22,14 +22,16 @@ import json
 import sys
 sys.path.insert(0, './')
 sys.path.insert(0, 'nebula3_database/')
+sys.path.insert(0, 'videoprocessing/OFA/')
 import torch
 from PIL import Image
 from nebula3_database.movie_db import MOVIE_DB
 from nebula3_database.playground_db import PLAYGROUND_DB
 import clip
 from clipcap import ClipCap
+from OFA.ofa_caption import OFA_LOADER
 class NEBULA_SCENE_DETECTOR():
-    def __init__(self, use_ClipCap=False):
+    def __init__(self, use_ClipCap=False, use_OFA=False):
         logging.basicConfig(format='%(asctime)s - %(message)s',
                             level=logging.INFO)
         self.video_eval = NebulaVideoEvaluation()
@@ -40,6 +42,10 @@ class NEBULA_SCENE_DETECTOR():
         self.s3 = boto3.client('s3', region_name='eu-central-1')
         if use_ClipCap:
             self.clip_cap = ClipCap()
+            self.device = torch.device("cuda:0" if torch.cuda.is_available() else 'cpu')
+            self.clip_model, self.clip_preprocess = clip.load("ViT-B/32", device=self.device, jit=False)
+        if use_OFA:
+            self.ofa = OFA_LOADER()
 
 
     def detect_scene_elements(self, video_file):
@@ -214,24 +220,25 @@ class NEBULA_SCENE_DETECTOR():
                 return img_names
 
     def generate_captions_on_mdfs(self, images, mdfs_path, prefix_link = "http://ec2-18-159-140-240.eu-central-1.compute.amazonaws.com:7000/static/dataset1/mdfs/"):
-        device = torch.device("cuda:0" if torch.cuda.is_available() else 'cpu')
-        model, preprocess = clip.load("ViT-B/32", device=device)
         # images_lst = [os.path.join(mdfs_path, image) for image in os.listdir(mdfs_path) if image in images]
         output_dict = {}
         for img_path in images:
+            # CLIP CAP
             frame = cv2.imread(img_path)
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            img = preprocess(Image.fromarray(frame)).unsqueeze(0).to(device)
-            embedding = model.encode_image(img)
-            output = self.clip_cap.generate_text(embedding, use_beam_search=False)
-            image_name = img_path.split("/")[-1]
-            print("Input:")
-            print(image_name)
-            link_path = os.path.join(prefix_link, image_name)
-            print(f"Link: {link_path}")
-            print("Output")
+            img = self.clip_preprocess(Image.fromarray(frame)).unsqueeze(0).to(self.device)
+            embedding = self.clip_model.encode_image(img)
+            clip_cap_output = self.clip_cap.generate_text(embedding, use_beam_search=False)
+
+            # OFA
+            image = Image.open(img_path)
+            sample = self.ofa.construct_sample(image)
+            result, _ = self.ofa.evaluate_caption(sample)
+            ofa_output = result[0]['caption']
+
             img_name = img_path.split("/")[-1]
-            output_dict[img_name] = output
+            output_dict[img_name] = [clip_cap_output]
+            output_dict[img_name].append(ofa_output)
         return output_dict
 
 
@@ -247,11 +254,12 @@ class NEBULA_SCENE_DETECTOR():
     # url - url to S3
     # last_frame - number of frames in movie
     # metadata - available metadata - fps, resolution....
-    def insert_movie(self, full_path, url, source, db_name="ilan_test"):
+    def insert_movie(self, full_path, url, source, db_name="prodemo"):
         # Change Database to `ilan_test`
-        self.nre.change_db("ilan_test")
+        self.nre.change_db("prodemo")
         self.db = self.nre.db
         file_name = full_path.split("/")[-1].replace(".mp4", "")
+        movie_id = self.nre.get_movie_by_filename(file_name)
         query = 'UPSERT { File: @File, scene_element: @scene_element} INSERT  \
             { File: @File, scene_element: @scene_element, \
                 url_path: @url, \
@@ -275,7 +283,6 @@ class NEBULA_SCENE_DETECTOR():
                             prefix_link = "http://ec2-18-159-140-240.eu-central-1.compute.amazonaws.com:7000/static/dataset1/mdfs/")
                     img_caption_outputs.update(caption_outputs)
                     
-            movie_id = self.nre.get_movie_by_filename(file_name)
 
             bind_vars = {
                             'ref': '',
@@ -292,7 +299,26 @@ class NEBULA_SCENE_DETECTOR():
             print(bind_vars)
             # Here we are using the PLAYGROUND database (self.pdb)
             self.pdb.aql.execute(query, bind_vars=bind_vars)
+
+    def update_s1_lsmdc_with_ofa(self):
+        #@TODO: update playground_db with a new function
+        doc = self.playground_instance.get_document(document_name="s1_lsmdc")
+        for movie in doc:
+            print(movie)
+            
+            query = 'UPSERT { movie_id: @movie_id} INSERT  \
+                { test: @test, url: @url, actions: @actions, base: @base, \
+                    places: @places, experts: @experts, groundtruth: @groundtruth, \
+                    scene_element: @scene_element, movie_id: @movie_id, ref: @ref, \
+                       _key: @_key, _id: @_id, _rev: @_rev\
+                    } UPDATE \
+                {   test: @test \
+                } IN s1_lsmdc'
+            movie["test"] = "test"
+            self.pdb.aql.execute(query, bind_vars=movie)
             debug=0
+
+        pass
 
 
     def get_movie_id_from_url(self, url):
@@ -689,8 +715,8 @@ class NEBULA_SCENE_DETECTOR():
 
 
 def main():
-    scene_detector = NEBULA_SCENE_DETECTOR(use_ClipCap=True)
-
+    scene_detector = NEBULA_SCENE_DETECTOR(use_ClipCap=False, use_OFA=False)
+    scene_detector.update_s1_lsmdc_with_ofa()
     concate_movies = False
     # We concatenate 20 movies of LSMDC
     if concate_movies:
@@ -743,7 +769,7 @@ def main():
         # print("-"*30)
         if movie_name + ".mp4" in good_videos_lst:
             # scene_detector.insert_movies_pipeline(full_path, url_link, source, db_name="ilan_test")
-            scene_detector.insert_movie(full_path, url_link, source, db_name="ilan_test")
+            scene_detector.insert_movie(full_path, url_link, source, db_name="prodemo")
 if __name__ == "__main__":
     main()
 

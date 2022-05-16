@@ -240,29 +240,29 @@ class ClipCap:
 
 
 if __name__ == '__main__':
-    
-    device = torch.device("cuda:0" if torch.cuda.is_available() else 'cpu')
-    model, preprocess = clip.load("ViT-B/32", device=device)
-    clip_cap = ClipCap()
-    mdfs_path = "/dataset/lsmdc/mdfs_of_20_clips/"
-    prefix_link = "http://ec2-18-159-140-240.eu-central-1.compute.amazonaws.com:7000/static/dataset1/mdfs/"
-    images = [os.path.join(mdfs_path, image) for image in os.listdir(mdfs_path)]
-    output_dict = {}
-    for img_path in images:
-        frame = cv.imread(img_path)
-        frame = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
-        img = preprocess(Image.fromarray(frame)).unsqueeze(0).to(device)
-        embedding = model.encode_image(img)
-        output = clip_cap.generate_text(embedding, use_beam_search=False)
-        image_name = img_path.split("/")[-1]
-        print("Input:")
-        print(image_name)
-        link_path = os.path.join(prefix_link, image_name)
-        print(f"Link: {link_path}")
-        print("Output")
+    pass
+    # device = torch.device("cuda:0" if torch.cuda.is_available() else 'cpu')
+    # model, preprocess = clip.load("ViT-B/32", device=device)
+    # clip_cap = ClipCap()
+    # mdfs_path = "/dataset/lsmdc/mdfs_of_20_clips/"
+    # prefix_link = "http://ec2-18-159-140-240.eu-central-1.compute.amazonaws.com:7000/static/dataset1/mdfs/"
+    # images = [os.path.join(mdfs_path, image) for image in os.listdir(mdfs_path)]
+    # output_dict = {}
+    # for img_path in images:
+    #     frame = cv.imread(img_path)
+    #     frame = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
+    #     img = preprocess(Image.fromarray(frame)).unsqueeze(0).to(device)
+    #     embedding = model.encode_image(img)
+    #     output = clip_cap.generate_text(embedding, use_beam_search=False)
+    #     image_name = img_path.split("/")[-1]
+    #     print("Input:")
+    #     print(image_name)
+    #     link_path = os.path.join(prefix_link, image_name)
+    #     print(f"Link: {link_path}")
+    #     print("Output")
 
-        # for out in output:
-        #     print(out)
-    with open('clipcap_output.txt', 'w') as f:
-        for val, key in output_dict.items():
-            f.write(f"{val} {key}")
+    #     # for out in output:
+    #     #     print(out)
+    # with open('clipcap_output.txt', 'w') as f:
+    #     for val, key in output_dict.items():
+    #         f.write(f"{val} {key}")
