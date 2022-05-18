@@ -40,11 +40,13 @@ class NEBULA_SCENE_DETECTOR():
         self.db = self.nre.db
         self.pdb = self.playground_instance.db
         self.s3 = boto3.client('s3', region_name='eu-central-1')
-        if use_ClipCap:
+        self.use_ClipCap = use_ClipCap
+        self.use_OFA = use_OFA
+        if self.use_ClipCap:
             self.clip_cap = ClipCap()
             self.device = torch.device("cuda:0" if torch.cuda.is_available() else 'cpu')
             self.clip_model, self.clip_preprocess = clip.load("ViT-B/32", device=self.device, jit=False)
-        if use_OFA:
+        if self.use_OFA:
             self.ofa = OFA_LOADER()
 
 
@@ -219,26 +221,33 @@ class NEBULA_SCENE_DETECTOR():
             if count > 9999:
                 return img_names
 
-    def generate_captions_on_mdfs(self, images, mdfs_path, prefix_link = "http://ec2-18-159-140-240.eu-central-1.compute.amazonaws.com:7000/static/dataset1/mdfs/"):
+    def generate_captions_on_mdfs(self, images, mdfs_path, prefix_link = "http://ec2-18-159-140-240.eu-central-1.compute.amazonaws.com:7000/static/dataset1/mdfs/"
+     ):
         # images_lst = [os.path.join(mdfs_path, image) for image in os.listdir(mdfs_path) if image in images]
         output_dict = {}
         for img_path in images:
+            img_name = img_path.split("/")[-1]
             # CLIP CAP
-            frame = cv2.imread(img_path)
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            img = self.clip_preprocess(Image.fromarray(frame)).unsqueeze(0).to(self.device)
-            embedding = self.clip_model.encode_image(img)
-            clip_cap_output = self.clip_cap.generate_text(embedding, use_beam_search=False)
+            if self.use_ClipCap:
+                frame = cv2.imread(img_path)
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                img = self.clip_preprocess(Image.fromarray(frame)).unsqueeze(0).to(self.device)
+                embedding = self.clip_model.encode_image(img)
+                clip_cap_output = self.clip_cap.generate_text(embedding, use_beam_search=False)
+                output_dict[img_name] = [clip_cap_output]
 
             # OFA
-            image = Image.open(img_path)
-            sample = self.ofa.construct_sample(image)
-            result, _ = self.ofa.evaluate_caption(sample)
-            ofa_output = result[0]['caption']
-
-            img_name = img_path.split("/")[-1]
-            output_dict[img_name] = [clip_cap_output]
-            output_dict[img_name].append(ofa_output)
+            if self.use_OFA:
+                image = Image.open(img_path)
+                sample = self.ofa.construct_sample(image)
+                result, _ = self.ofa.evaluate_caption(sample)
+                ofa_output = result[0]['caption']
+                if not self.use_ClipCap:
+                    # ClipCap wasn't used, we use only one string caption
+                    output_dict[img_name] = ofa_output
+                else:
+                    # ClipCap was used, so we have a list here.
+                    output_dict[img_name].append(ofa_output)
         return output_dict
 
 
@@ -301,24 +310,54 @@ class NEBULA_SCENE_DETECTOR():
             self.pdb.aql.execute(query, bind_vars=bind_vars)
 
     def update_s1_lsmdc_with_ofa(self):
-        #@TODO: update playground_db with a new function
-        doc = self.playground_instance.get_document(document_name="s1_lsmdc")
-        for movie in doc:
+        #@TODO: update playground_db with a new function get_document
+        doc_s1_lsmdc = self.playground_instance.get_document(document_name="s1_lsmdc")
+        for movie in doc_s1_lsmdc:
             print(movie)
             
             query = 'UPSERT { movie_id: @movie_id} INSERT  \
-                { test: @test, url: @url, actions: @actions, base: @base, \
+                { ofa: @ofa, url: @url, actions: @actions, base: @base, \
                     places: @places, experts: @experts, groundtruth: @groundtruth, \
                     scene_element: @scene_element, movie_id: @movie_id, ref: @ref, \
                        _key: @_key, _id: @_id, _rev: @_rev\
                     } UPDATE \
-                {   test: @test \
+                {   ofa: @ofa \
                 } IN s1_lsmdc'
-            movie["test"] = "test"
-            self.pdb.aql.execute(query, bind_vars=movie)
-            debug=0
 
-        pass
+            movie_id = movie['movie_id']
+            scene_element_idx = movie['scene_element']
+            scene_element = self.playground_instance.get_movie_info(movie_id=movie_id)[0]['scene_elements'][scene_element_idx]
+            full_path = os.path.join("/dataset/development",movie['url'].split("/")[-1])
+            mdfs = self.detect_mdf(full_path, [scene_element])
+            mdf_outputs = []
+            img_caption_outputs = {}
+            for mdf in mdfs:
+                mdf_images_path = self.save_mdfs_to_jpg(full_path, mdf, save_path="/dataset/lsmdc/mdfs_of_s1_lsmdc/")
+                if mdf_images_path:
+                    caption_outputs = self.generate_captions_on_mdfs(mdf_images_path, 
+                            mdfs_path="/dataset/lsmdc/mdfs_of_s1_lsmdc/",
+                            prefix_link = "http://ec2-18-159-140-240.eu-central-1.compute.amazonaws.com:7000/static/dataset1/mdfs/")
+                    img_caption_outputs.update(caption_outputs)
+
+            movie["ofa"] = img_caption_outputs
+            self.pdb.aql.execute(query, bind_vars=movie)
+
+    
+    def update_s2_clsmdc_with_indices(self):
+        doc_s2_clsmdc = self.playground_instance.get_document(document_name="s2_clsmdc")
+        for idx, movie in enumerate(doc_s2_clsmdc):
+            print(movie)
+            
+            query = 'UPSERT { movie_id: @movie_id, scene_element: @scene_element}  INSERT\
+                { movie_id: @movie_id, scene_element: @scene_element, index: @index, \
+                    _key: @_key, _id: @_id, _rev: @_rev, url_path: @url_path, captions: @captions, ref: @ref, \
+                    experts: @experts, groundtruth: @groundtruth, base: @base, source: @source, File: @File } UPDATE \
+                {   index: @index \
+                } IN s2_clsmdc'
+
+            movie["index"] = idx
+            self.pdb.aql.execute(query, bind_vars=movie)
+            debug = 0
 
 
     def get_movie_id_from_url(self, url):
@@ -716,7 +755,8 @@ class NEBULA_SCENE_DETECTOR():
 
 def main():
     scene_detector = NEBULA_SCENE_DETECTOR(use_ClipCap=False, use_OFA=False)
-    scene_detector.update_s1_lsmdc_with_ofa()
+    # scene_detector.update_s2_clsmdc_with_indices()
+    # scene_detector.update_s1_lsmdc_with_ofa()
     concate_movies = False
     # We concatenate 20 movies of LSMDC
     if concate_movies:
