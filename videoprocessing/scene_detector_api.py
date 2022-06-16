@@ -25,21 +25,30 @@ sys.path.insert(0, 'nebula3_database/')
 sys.path.insert(0, 'videoprocessing/OFA/')
 import torch
 from PIL import Image
-from nebula3_database.movie_db import MOVIE_DB
-from nebula3_database.playground_db import PLAYGROUND_DB
+try:
+    from nebula3_database.movie_db import MOVIE_DB
+    from nebula3_database.playground_db import PLAYGROUND_DB
+    from OFA.ofa_caption import OFA_LOADER
+except:
+    pass
 import clip
 from clipcap import ClipCap
-from OFA.ofa_caption import OFA_LOADER
+
+from clip_video_utils import ClipVideoUtils
+import argparse
+
 class NEBULA_SCENE_DETECTOR():
-    def __init__(self, use_ClipCap=False, use_OFA=False):
+    def __init__(self, use_ClipCap=False, use_OFA=False, use_nebula3=True):
         logging.basicConfig(format='%(asctime)s - %(message)s',
                             level=logging.INFO)
-        self.video_eval = NebulaVideoEvaluation()
-        self.nre = MOVIE_DB()
-        self.playground_instance = PLAYGROUND_DB()
-        self.db = self.nre.db
-        self.pdb = self.playground_instance.db
-        self.s3 = boto3.client('s3', region_name='eu-central-1')
+        # self.video_eval = NebulaVideoEvaluation()
+        self.video_utils = ClipVideoUtils()
+        if use_nebula3:
+            self.nre = MOVIE_DB()
+            self.playground_instance = PLAYGROUND_DB()
+            self.db = self.nre.db
+            self.pdb = self.playground_instance.db
+            self.s3 = boto3.client('s3', region_name='eu-central-1')
         self.use_ClipCap = use_ClipCap
         self.use_OFA = use_OFA
         if self.use_ClipCap:
@@ -50,23 +59,32 @@ class NEBULA_SCENE_DETECTOR():
             self.ofa = OFA_LOADER()
 
 
-    def detect_scene_elements(self, video_file):
+    def detect_scene_elements(self, video_file, method='scene_manager'):
         print("DEBUG: ", video_file)
         scenes = []
-        video_manager = VideoManager([video_file])
-        scene_manager = SceneManager()
-        scene_manager.add_detector(ContentDetector(threshold=30.0))
-    # Improve processing speed by downscaling before processing.
-        video_manager.set_downscale_factor()
-    # Start the video manager and perform the scene detection.
-        video_manager.start()     
-        scene_manager.detect_scenes(frame_source=video_manager)
-        scene_list = scene_manager.get_scene_list()
-        for i, scene in enumerate(scene_list):
-            start_frame = scene[0].get_frames()
-            stop_frame = scene[1].get_frames()
-            scenes.append([start_frame,stop_frame])
-        print("Scenes elements: ", scenes)
+        if method == 'scene_manager':
+                video_manager = VideoManager([video_file])
+                scene_manager = SceneManager()
+                scene_manager.add_detector(ContentDetector(threshold=30.0))
+            # Improve processing speed by downscaling before processing.
+                video_manager.set_downscale_factor()
+            # Start the video manager and perform the scene detection.
+                video_manager.start()
+                scene_manager.detect_scenes(frame_source=video_manager)
+                scene_list = scene_manager.get_scene_list()
+                for i, scene in enumerate(scene_list):
+                    start_frame = scene[0].get_frames()
+                    stop_frame = scene[1].get_frames()
+                    scenes.append([start_frame,stop_frame])
+                # secnes is list of lists
+                print("Scenes elements: ", scenes)
+        elif method == 'clip':
+            # boundaries is list of tuples
+            boundaries, good_frame_len = self.video_utils.get_scene_elements_from_embeddings(video_file)
+            scenes = []
+            for boundary in boundaries:
+                scenes.append([boundary[0], boundary[1]])
+
         return(scenes)
 
     def divide_movie_into_frames(self, movie_in_path, movie_out_folder, save_frames=False):
@@ -149,16 +167,51 @@ class NEBULA_SCENE_DETECTOR():
         :param video_file:
         :param scene_elements: list of list, [[2, 4], [33, 55]] - start and end frame of each scene
         :param method: '3frames' - choose three good frames, 'clip_segment' - use clip segmentation to choose 3 MDFs
-        :return:
+        :return: list of lists
         """
         print("Detecting MDFs..")
-        if method == '3frames':
+        if method == '1frame':
             mdfs = []
             for scene_element in scene_elements:
                 scene_mdfs = []
                 start_frame = scene_element[0]
                 stop_frame = scene_element[1]
-                frame_qual = self.video_eval.mark_blurred_frames(video_file, start_frame, stop_frame, 100)
+                blur_threshold, values, fft_center, fft_border = self.video_utils.get_adaptive_movie_threshold(video_file,
+                    start_frame, stop_frame)
+                scene_mdfs.append(np.argmax(values) + scene_element[0])
+                mdfs.append(scene_mdfs)
+            pass
+        elif method == 'fft_center':
+            mdfs = []
+            for scene_element in scene_elements:
+                scene_mdfs = []
+                start_frame = scene_element[0]
+                stop_frame = scene_element[1]
+                blur_threshold, values, fft_center, fft_border = self.video_utils.get_adaptive_movie_threshold(
+                    video_file,
+                    start_frame, stop_frame)
+                scene_mdfs.append(np.argmin(fft_center) + scene_element[0])
+                mdfs.append(scene_mdfs)
+        elif method == 'fft_border':
+            mdfs = []
+            for scene_element in scene_elements:
+                scene_mdfs = []
+                start_frame = scene_element[0]
+                stop_frame = scene_element[1]
+                blur_threshold, values, fft_center, fft_border = self.video_utils.get_adaptive_movie_threshold(
+                    video_file,
+                    start_frame, stop_frame)
+                scene_mdfs.append(np.argmax(fft_border) + scene_element[0])
+                mdfs.append(scene_mdfs)
+        elif method == '3frames':
+            mdfs = []
+            for scene_element in scene_elements:
+                scene_mdfs = []
+                start_frame = scene_element[0]
+                stop_frame = scene_element[1]
+                # frame_qual = self.video_eval.mark_blurred_frames(video_file, start_frame, stop_frame, -1)
+                frame_qual = self.video_utils.mark_blurred_frames(video_file, start_frame, stop_frame, -1)
+
                 # Ignore the blurred images
                 frame_qual[0:3] = 0
                 frame_qual[-3:] = 0
@@ -166,8 +219,8 @@ class NEBULA_SCENE_DETECTOR():
                 good_frames = np.where(frame_qual > 0)[0]
                 if len(good_frames > 5):
                     stop_frame = start_frame + good_frames[-1]
-                    start_frame = start_frame + good_frames[0]
                     middle_frame = start_frame + good_frames[len(good_frames) // 2]
+                    start_frame = start_frame + good_frames[0]
                     scene_mdfs.append(int(start_frame))
                     scene_mdfs.append(int(middle_frame))
                     scene_mdfs.append(int(stop_frame))
@@ -176,9 +229,14 @@ class NEBULA_SCENE_DETECTOR():
                     scene_mdfs.append(int(middle_frame))
                     scene_mdfs.append(int(stop_frame) - 2)
                 mdfs.append(scene_mdfs)
-            # go over all frames and compute the average derivative
         elif method == 'clip_segment':
-            pass
+            mdfs = []
+            for scene_element in scene_elements:
+                scene_mdfs = []
+                chosen_mdf, ret_img = scene_detector.video_utils.choose_best_frame(video_file,
+                    scene_element[0], scene_element[1])
+                scene_mdfs.append(chosen_mdf)
+            mdfs.append(scene_mdfs)
         else:
             raise Exception('Unsupported method')
         # mdfs = []
@@ -753,6 +811,258 @@ class NEBULA_SCENE_DETECTOR():
         self.concat_mp4(lsmdc_train_dict_merged[:num_of_movies + 1], base_path, dest_path)
 
 
+def create_mdf_string_save_img(method, scene_element, file_name, scene_detector, scene, img_folder):
+    mdf_string = ''
+    mdf_list = scene_detector.detect_mdf(file_name, [scene_element], method)
+    for mdfs in mdf_list:
+        mdfs = list(set(mdfs))
+        for mdf in mdfs:
+            mdf_string = mdf_string + ' ' + str(mdf)
+
+    mdf_images = scene_detector.video_utils.get_specific_frames(file_name, mdf_list)
+
+    k = 0
+    for mdf_set in mdf_list:
+        if scene_element[1] in mdf_set:
+            mdf_set.remove(scene_element[1])
+        mdf_set = list(set(mdf_set))
+        for mdf in mdf_set:
+            imgname = scene[scene.find('/') + 1:scene.rfind('.')] + f'_old_scene_{mdf:04}.jpg'
+            cv2.imwrite(os.path.join(img_folder, imgname), mdf_images[k])
+            k = k + 1
+
+    return mdf_string
+
+
+def test_different_thresholds():
+    base_folder = '/dataset/lsmdc/avi/'
+    scenes = ["2054_Harry_Potter_and_the_prisoner_of_azkaban/2054_Harry_Potter_and_the_prisoner_of_azkaban_01.03.14.878-01.03.15.557.avi",
+            "2054_Harry_Potter_and_the_prisoner_of_azkaban/2054_Harry_Potter_and_the_prisoner_of_azkaban_00.06.36.732-00.06.38.382.avi",
+            "2054_Harry_Potter_and_the_prisoner_of_azkaban/2054_Harry_Potter_and_the_prisoner_of_azkaban_00.38.04.753-00.38.05.740.avi",
+            "2054_Harry_Potter_and_the_prisoner_of_azkaban/2054_Harry_Potter_and_the_prisoner_of_azkaban_01.28.07.709-01.28.11.284.avi",
+            "2054_Harry_Potter_and_the_prisoner_of_azkaban/2054_Harry_Potter_and_the_prisoner_of_azkaban_02.01.22.526-02.01.26.569.avi",
+            "0027_The_Big_Lebowski/0027_The_Big_Lebowski_01.29.38.129-01.29.39.478.avi",
+            "0027_The_Big_Lebowski/0027_The_Big_Lebowski_00.40.50.502-00.40.54.662.avi",
+            "0027_The_Big_Lebowski/0027_The_Big_Lebowski_01.41.05.074-01.41.10.316.avi",
+            "0027_The_Big_Lebowski/0027_The_Big_Lebowski_00.29.44.261-00.29.45.192.avi",
+            "0027_The_Big_Lebowski/0027_The_Big_Lebowski_01.34.35.180-01.34.39.204.avi",
+            "2012_Unbreakable/2012_Unbreakable_00.42.07.783-00.42.09.797.avi",
+            "2012_Unbreakable/2012_Unbreakable_00.44.24.867-00.44.27.970.avi",
+            "2012_Unbreakable/2012_Unbreakable_01.10.54.862-01.10.58.055.avi",
+            "2012_Unbreakable/2012_Unbreakable_00.37.46.880-00.37.54.563.avi",
+            "2012_Unbreakable/2012_Unbreakable_00.22.05.930-00.22.21.541.avi",
+            "1035_The_Adjustment_Bureau/1035_The_Adjustment_Bureau_01.35.24.597-01.35.30.366.avi",
+            "1035_The_Adjustment_Bureau/1035_The_Adjustment_Bureau_01.16.27.938-01.16.34.205.avi",
+            "1035_The_Adjustment_Bureau/1035_The_Adjustment_Bureau_01.18.25.654-01.18.29.908.avi",
+            "1035_The_Adjustment_Bureau/1035_The_Adjustment_Bureau_01.29.55.922-01.29.58.607.avi",
+            "1035_The_Adjustment_Bureau/1035_The_Adjustment_Bureau_01.17.00.907-01.17.04.533.avi",
+            "1038_The_Great_Gatsby/1038_The_Great_Gatsby_00.30.55.942-00.30.58.377.avi",
+            "1038_The_Great_Gatsby/1038_The_Great_Gatsby_00.58.36.915-00.58.39.961.avi",
+            "1038_The_Great_Gatsby/1038_The_Great_Gatsby_00.55.06.930-00.55.09.734.avi",
+            "1038_The_Great_Gatsby/1038_The_Great_Gatsby_01.33.48.154-01.33.49.634.avi",
+            "1038_The_Great_Gatsby/1038_The_Great_Gatsby_01.16.18.342-01.16.20.510.avi",
+            "0022_Reservoir_Dogs/0022_Reservoir_Dogs_00.09.45.850-00.09.47.403.avi",
+            "0022_Reservoir_Dogs/0022_Reservoir_Dogs_00.05.27.265-00.05.29.057.avi",
+            "0022_Reservoir_Dogs/0022_Reservoir_Dogs_01.13.30.094-01.13.33.419.avi",
+            "0022_Reservoir_Dogs/0022_Reservoir_Dogs_01.19.21.502-01.19.23.673.avi",
+            "0022_Reservoir_Dogs/0022_Reservoir_Dogs_00.58.40.019-00.58.52.999.avi"]
+
+    # Go over all chosen scenes and choose the frames
+    save_folder = '/home/migakol/data/blur_comp'
+    out_file_csv = open(os.path.join(save_folder, 'result_csv.csv'), 'w')
+    # fieldnames = ['movie name', 'scenes', '1frame', 'fft_center', 'fft_border']
+    fieldnames = ['movie name', 'scenes', 'clip_mdf']
+    writer = csv.DictWriter(out_file_csv, fieldnames=fieldnames)
+    # writer.writerow({'movie name': 'movie name', 'scenes': 'scenes',
+    #                  '1frame': '1frame', 'fft_center': 'fft_center', 'fft_border': 'fft_border'})
+    writer.writerow({'movie name': 'movie name', 'scenes': 'scenes', 'clip_mdf': 'clip_mdf'})
+    scene_detector = NEBULA_SCENE_DETECTOR(use_ClipCap=False, use_OFA=False, use_nebula3=False)
+    for scene in scenes:
+        # scene here is a short video
+        # Detect scenes using the old method (visual change based scene detector)
+        scene_elements_old = scene_detector.detect_scene_elements(os.path.join(base_folder, scene))
+        # Go over all the old scenes and detect MDFs using two different methods
+        mdfs_fft_center_scenes = ''
+        mdfs_fft_border_scenes = ''
+        mdfs_1frame_scenes = ''
+        clip_mdf = ''
+        for idx_scene_element, scene_element in enumerate(scene_elements_old):
+            if scene_element[1] - scene_element[0] < 4:
+                continue
+            chosen_mdf, ret_img = scene_detector.video_utils.choose_best_frame(os.path.join(base_folder, scene),
+                            scene_element[0], scene_element[1])
+            clip_mdf = clip_mdf + ' ' + str(chosen_mdf)
+            imgname = scene[scene.find('/') + 1:scene.rfind('.')] + f'_old_scene_{chosen_mdf:04}.jpg'
+            cv2.imwrite(os.path.join(save_folder, imgname), ret_img[0])
+
+            # mdfs_fft_center_scenes = mdfs_fft_center_scenes + ' ' + create_mdf_string_save_img('fft_center',
+            #         scene_element, os.path.join(base_folder, scene), scene_detector, scene, save_folder)
+            # mdfs_fft_border_scenes = mdfs_fft_border_scenes + ' ' + create_mdf_string_save_img('fft_border',
+            #         scene_element, os.path.join(base_folder, scene), scene_detector, scene, save_folder)
+            # mdfs_1frame_scenes = mdfs_1frame_scenes + ' ' + create_mdf_string_save_img('1frame',
+            #         scene_element, os.path.join(base_folder, scene), scene_detector, scene, save_folder)
+
+        scene_element_old_str = ''
+        for scene_element in scene_elements_old:
+            scene_element_old_str = scene_element_old_str + ' ' + str(scene_element[0]) + '-' + str(scene_element[1])
+
+        # writer.writerow({'movie name': scene[scene.find('/') + 1:],
+        #                  'scenes': scene_element_old_str,
+        #                  '1frame': mdfs_1frame_scenes,
+        #                  'fft_center': mdfs_fft_center_scenes,
+        #                  'fft_border': mdfs_fft_border_scenes})
+        writer.writerow({'movie name': scene[scene.find('/') + 1:],
+                         'scenes': scene_element_old_str,
+                         'clip_mdf': clip_mdf})
+
+def single_mdf_selection():
+    base_folder = '/dataset/lsmdc/avi/'
+    scene = '2054_Harry_Potter_and_the_prisoner_of_azkaban/2054_Harry_Potter_and_the_prisoner_of_azkaban_00.06.36.732-00.06.38.382.avi'
+
+    scene_detector = NEBULA_SCENE_DETECTOR(use_ClipCap=False, use_OFA=False, use_nebula3=False)
+    scene_elements_clip = scene_detector.detect_scene_elements(os.path.join(base_folder, scene), method='clip')
+
+    for idx_scene_element, scene_element in enumerate(scene_elements_clip):
+        # mdfs_old = scene_detector.detect_mdf(os.path.join(base_folder, scene), [scene_element])
+        mdfs_new = scene_detector.detect_mdf(os.path.join(base_folder, scene), [scene_element], '1frame')
+        mdfs_new = scene_detector.detect_mdf(os.path.join(base_folder, scene), [scene_element], 'fft_center')
+        mdfs_new = scene_detector.detect_mdf(os.path.join(base_folder, scene), [scene_element], 'fft_border')
+        print(mdfs_new)
+
+def test_mdf_selection():
+    """
+    The function test the whole mdf selection pipeline, from scene element detection to actual mdf selection
+    :return:
+    """
+
+    base_folder = '/dataset/lsmdc/avi/'
+    num_movies = 6
+    num_scenes = 5
+    # Choose randomly num_movies movies and then num_scenes from each movie
+    movies = os.listdir(base_folder)
+    perm_indexes = np.random.permutation(len(movies))
+    chosen_scenes = []
+    for k in range(num_movies):
+        movie = movies[perm_indexes[k]]
+        all_scenes = os.listdir(os.path.join(base_folder, movie))
+        scene_perm_indexes = np.random.permutation(len(all_scenes))
+        for m in range(num_scenes):
+            scene = all_scenes[scene_perm_indexes[m]]
+            chosen_scenes.append(os.path.join(movie, scene))
+
+    print('Finished chosing')
+
+    # Go over all chosen scenes and choose the frames
+    save_folder = '/home/migakol/data/blur_comp'
+    out_file_csv = open(os.path.join(save_folder, 'result_csv.csv'), 'w')
+    fieldnames = ['movie name', 'old scenes', 'new scenes', 'old mdfs old scenes', 'new mdfs old scenes',
+                  'old mdfs new scenes', 'new mdfs new scenes']
+    writer = csv.DictWriter(out_file_csv, fieldnames=fieldnames)
+    writer.writerow({'movie name': 'movie name', 'old scenes': 'old scenes', 'new scenes': 'new scenes',
+                     'old mdfs old scenes': 'old mdfs old scenes', 'new mdfs old scenes': 'new mdfs old scenes',
+                     'old mdfs new scenes': 'old mdfs new scenes', 'new mdfs new scenes': 'new mdfs new scenes'})
+    scene_detector = NEBULA_SCENE_DETECTOR(use_ClipCap=False, use_OFA=False, use_nebula3=False)
+    for scene in chosen_scenes:
+        # scene = '2054_Harry_Potter_and_the_prisoner_of_azkaban/2054_Harry_Potter_and_the_prisoner_of_azkaban_00.06.36.732-00.06.38.382.avi'
+        # scene here is a short video
+        # Detect scenes using the old method (visual change based scene detector)
+        scene_elements_old = scene_detector.detect_scene_elements(os.path.join(base_folder, scene))
+        # Detect scenes using CLIP embedding differences
+        scene_elements_clip = scene_detector.detect_scene_elements(os.path.join(base_folder, scene), method='clip')
+        # Go over all the old scenes and detect MDFs using two different methods
+        mdfs_old_old_scenes = ''
+        mdfs_new_old_scenes = ''
+        for idx_scene_element, scene_element in enumerate(scene_elements_old):
+            if scene_element[1] - scene_element[0] < 4:
+                continue
+            mdfs_old = scene_detector.detect_mdf(os.path.join(base_folder, scene), [scene_element])
+            for mdfs in mdfs_old:
+                mdfs = list(set(mdfs))
+                for mdf in mdfs:
+                    mdfs_old_old_scenes = mdfs_old_old_scenes + ' ' + str(mdf)
+            mdfs_new = scene_detector.detect_mdf(os.path.join(base_folder, scene), [scene_element], '1frame')
+            for mdfs in mdfs_new:
+                mdfs = list(set(mdfs))
+                for mdf in mdfs:
+                    mdfs_new_old_scenes = mdfs_new_old_scenes + ' ' + str(mdf)
+            # Store the detected MDFs as images
+            old_scenes = scene_detector.video_utils.get_specific_frames(os.path.join(base_folder, scene), mdfs_old)
+            new_scenes = scene_detector.video_utils.get_specific_frames(os.path.join(base_folder, scene), mdfs_new)
+            # save the scenes
+            k = 0
+            for mdf_set in mdfs_old:
+                if scene_element[1] in mdf_set:
+                    mdf_set.remove(scene_element[1])
+                mdf_set = list(set(mdf_set))
+                for mdf in mdf_set:
+                    filename = scene[scene.find('/')+1:scene.rfind('.')] + f'_old_scene_{mdf:04}.jpg'
+                    cv2.imwrite(os.path.join(save_folder, filename), old_scenes[k])
+                    k = k + 1
+
+            k = 0
+            for mdf_set in mdfs_new:
+                if scene_element[1] in mdf_set:
+                    mdf_set.remove(scene_element[1])
+                mdf_set = list(set(mdf_set))
+                for mdf in mdf_set:
+                    filename = scene[scene.find('/')+1:scene.rfind('.')] + f'_new_scene_{mdf:04}.jpg'
+                    cv2.imwrite(os.path.join(save_folder, filename), new_scenes[k])
+                    k = k + 1
+
+        mdfs_old_new_scenes = ''
+        mdfs_new_new_scenes = ''
+        for idx_scene_element, scene_element in enumerate(scene_elements_clip):
+            mdfs_old = scene_detector.detect_mdf(os.path.join(base_folder, scene), [scene_element])
+            for mdfs in mdfs_old:
+                mdfs = list(set(mdfs))
+                for mdf in mdfs:
+                    mdfs_old_new_scenes = mdfs_old_new_scenes + ' ' + str(mdf)
+            mdfs_new = scene_detector.detect_mdf(os.path.join(base_folder, scene), [scene_element], '1frame')
+            for mdfs in mdfs_new:
+                mdfs = list(set(mdfs))
+                for mdf in mdfs:
+                    mdfs_new_new_scenes = mdfs_new_new_scenes + ' ' + str(mdf)
+            # Store the detected MDFs as images
+            old_scenes = scene_detector.video_utils.get_specific_frames(os.path.join(base_folder, scene), mdfs_old)
+            new_scenes = scene_detector.video_utils.get_specific_frames(os.path.join(base_folder, scene), mdfs_new)
+            # save the scenes
+            k = 0
+            for mdf_set in mdfs_old:
+                if scene_element[1] in mdf_set:
+                    mdf_set.remove(scene_element[1])
+                mdf_set = list(set(mdf_set))
+                for mdf in mdf_set:
+                    filename = scene[scene.find('/')+1:scene.rfind('.')] + f'_old_scene_{mdf:04}.jpg'
+                    cv2.imwrite(os.path.join(save_folder, filename), old_scenes[k])
+                    k = k + 1
+
+            k = 0
+            for mdf_set in mdfs_new:
+                if scene_element[1] in mdf_set:
+                    mdf_set.remove(scene_element[1])
+                mdf_set = list(set(mdf_set))
+                for mdf in mdf_set:
+                    filename = scene[scene.find('/')+1:scene.rfind('.')] + f'_new_scene_{mdf:04}.jpg'
+                    cv2.imwrite(os.path.join(save_folder, filename), new_scenes[k])
+                    k = k + 1
+
+        scene_element_old_str = ''
+        for scene_element in scene_elements_old:
+            scene_element_old_str = scene_element_old_str + ' ' + str(scene_element[0]) + '-' + str(scene_element[1])
+
+        scene_elements_clip_str = ''
+        for scene_element in scene_elements_clip:
+            scene_elements_clip_str = scene_elements_clip_str + ' ' + str(scene_element[0]) + '-' + str(scene_element[1])
+
+        writer.writerow({'movie name': scene[scene.find('/')+1:],
+                         'old scenes': scene_element_old_str,
+                         'new scenes': scene_elements_clip_str,
+                         'old mdfs old scenes': mdfs_old_old_scenes,
+                         'new mdfs old scenes': mdfs_new_old_scenes,
+                         'old mdfs new scenes': mdfs_old_new_scenes,
+                         'new mdfs new scenes': mdfs_new_new_scenes})
+
+
 def main():
     scene_detector = NEBULA_SCENE_DETECTOR(use_ClipCap=False, use_OFA=False)
     # scene_detector.update_s2_clsmdc_with_indices()
@@ -810,8 +1120,20 @@ def main():
         if movie_name + ".mp4" in good_videos_lst:
             # scene_detector.insert_movies_pipeline(full_path, url_link, source, db_name="ilan_test")
             scene_detector.insert_movie(full_path, url_link, source, db_name="prodemo")
+
+
 if __name__ == "__main__":
-    main()
+
+    parser = argparse.ArgumentParser(description='Scene detection API')
+    parser.add_argument('--test_mdf', action='store_true')
+    args = parser.parse_args()
+
+    if args.test_mdf:
+        # test_mdf_selection()
+        # single_mdf_selection()
+        test_different_thresholds()
+    else:
+        main()
 
 
     
