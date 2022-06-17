@@ -3,8 +3,8 @@ from typing import Counter
 from scenedetect.video_splitter import split_video_ffmpeg, is_ffmpeg_available
 # Standard PySceneDetect imports:
 from scenedetect import VideoManager, scene_detector
-from scenedetect import SceneManager
 # For content-aware scene detection:
+from scenedetect import SceneManager
 from scenedetect.detectors import ContentDetector
 from pickle import STACK_GLOBAL
 import cv2
