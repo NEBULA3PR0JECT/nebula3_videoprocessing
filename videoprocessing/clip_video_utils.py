@@ -105,7 +105,7 @@ class ClipVideoUtils:
 
         return embedding_array, fps
 
-    def choose_frames_with_meanshift(self, movie_name, start_frame, end_frame):
+    def choose_frames_with_meanshift(self, movie_name, start_frame=-1, end_frame=1000000000):
         """
         Choose the best frame using meanshift algorithm on CLIP embedding
         :param movie_name:
