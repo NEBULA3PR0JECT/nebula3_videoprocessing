@@ -4,6 +4,7 @@ import numpy as np
 import cv2 as cv
 from PIL import Image
 from copy import deepcopy
+from sklearn.cluster import MeanShift
 
 
 class ClipVideoUtils:
@@ -64,12 +65,13 @@ class ClipVideoUtils:
 
         return ret_boundaries, good_frame_len
 
-    def get_embedding_diffs(self, movie_name, start_time=-1, end_time=10000000):
+    def get_embedding_diffs(self, movie_name, start_time=-1, end_time=10000000, frame_or_time=1):
         """
         Given the movie name and the start / end time, return the CLIP embedding differeneces
         :param movie_name:
         :param start_time:
         :param end_time:
+        :param frame_or_time if 0, we treat input as frame, if 1 as time
         :return:
         """
         cap = cv.VideoCapture(movie_name)
@@ -81,6 +83,8 @@ class ClipVideoUtils:
         embedding_array = np.zeros((0, self.model_res))
         frame_num = 0
         fps = cap.get(cv.CAP_PROP_FPS)
+        if frame_or_time == 0:
+            fps = 1
         while cap.isOpened() and ret:
             if (frame_num >= start_time * fps) and (frame_num < end_time * fps):
                 with torch.no_grad():
@@ -101,11 +105,45 @@ class ClipVideoUtils:
 
         return embedding_array, fps
 
+    def choose_frames_with_meanshift(self, movie_name, start_frame, end_frame):
+        """
+        Choose the best frame using meanshift algorithm on CLIP embedding
+        :param movie_name:
+        :param start_frame:
+        :param end_frame:
+        :return:
+        """
+        ret_frame_list = []
+        ret_image_list = []
+        embedding_array, fps = self.get_embedding_diffs(movie_name, start_frame, end_frame, 0)
+        clustering = MeanShift(bandwidth=0.4).fit(embedding_array)
+        num_clusters = clustering.cluster_centers_.shape[0]
+        for k in range(num_clusters):
+            # choose the frame closest to the cluster
+            dist_emb = embedding_array - np.matmul(np.ones((embedding_array.shape[1], 1)),
+                                        np.reshape(clustering.cluster_centers_[k, :], (1, embedding_array.shape[1])))
+            ret = np.argmin(np.sum(dist_emb * dist_emb, 1)) + start_frame
+            ret_img = self.get_specific_frames(movie_name, [[ret]])
+
+            ret_frame_list.append(ret)
+            ret_image_list.append(ret_img)
+
+        return ret_frame_list, ret_image_list
+
     def choose_best_frame(self, movie_name, start_frame, end_frame):
+        """
+        The function choose the best frame from a given leg
+        :param movie_name:
+        :param start_frame:
+        :param end_frame:
+        :return:
+        """
+
         embedding_array, fps = self.get_embedding_diffs(movie_name)
         rel_embeddings = deepcopy(embedding_array[start_frame:end_frame])
         mean_emb = np.mean(rel_embeddings, 0)
-        dist_emb = rel_embeddings - np.matmul(np.ones((end_frame-start_frame, 1)), np.reshape(mean_emb, (1, 640)))
+        dist_emb = rel_embeddings - np.matmul(np.ones((end_frame-start_frame, 1)),
+                                              np.reshape(mean_emb, (1, embedding_array.shape[1])))
         # Remove 20% outliers
         total_dist = np.sum(dist_emb * dist_emb, 1)
         indexes = np.argsort(total_dist)
@@ -113,7 +151,7 @@ class ClipVideoUtils:
         inlier_indexes = indexes[0:np.max([int(len(total_dist) * 0.8), 2])]
         mean_emb = np.mean(rel_embeddings[inlier_indexes, :], 0)
         dist_emb = rel_embeddings[inlier_indexes, :] - \
-                   np.matmul(np.ones((len(inlier_indexes), 1)), np.reshape(mean_emb, (1, 640)))
+                   np.matmul(np.ones((len(inlier_indexes), 1)), np.reshape(mean_emb, (1, embedding_array.shape[1])))
         total_dist = np.sum(dist_emb * dist_emb, 1)
         ret = inlier_indexes[np.argmin(np.sum(dist_emb * dist_emb, 1))] + start_frame
 
