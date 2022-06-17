@@ -12,7 +12,7 @@ import os
 import logging
 import uuid
 # from arango import ArangoClient
-from benchmark.clip_benchmark import NebulaVideoEvaluation
+# from benchmark.clip_benchmark import NebulaVideoEvaluation
 import numpy as np
 import glob
 #import redis
