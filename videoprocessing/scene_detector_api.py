@@ -32,7 +32,7 @@ try:
 except:
     pass
 import clip
-from clipcap import ClipCap
+from clipcap_nebula import ClipCap
 
 from clip_video_utils import ClipVideoUtils
 import argparse
