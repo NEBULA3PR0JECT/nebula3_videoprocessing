@@ -10,6 +10,8 @@ c. `conda env create --name videoprocessing --file=environment.yml`
 
 d. `conda activate videoprocessing`
 
+# in case CLIP is needed
+pip install git+https://github.com/openai/CLIP.git
 
 # What this repo includes (currently):
 
