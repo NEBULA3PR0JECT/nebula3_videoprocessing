@@ -105,18 +105,20 @@ class ClipVideoUtils:
 
         return embedding_array, fps
 
-    def choose_frames_with_meanshift(self, movie_name, start_frame=-1, end_frame=1000000000):
+    def choose_frames_with_meanshift(self, movie_name, start_frame=-1, end_frame=1000000000, bandwidth=0.45):
         """
         Choose the best frame using meanshift algorithm on CLIP embedding
-        :param movie_name:
-        :param start_frame:
+        :param movie_name: the name of the movie
+        :param start_frame: we look only at the section between the start_frame and the end_frame
         :param end_frame:
-        :return:
+        :param bandwidth: the meanshift parameter. The smaller the value, the more clusters we'll have. It's possible
+            not to pass the parameter aannd let the aalgorithm to detect the optimal value
+        :return: a list of frames and a list of
         """
         ret_frame_list = []
         ret_image_list = []
         embedding_array, fps = self.get_embedding_diffs(movie_name, start_frame, end_frame, 0)
-        clustering = MeanShift(bandwidth=0.4).fit(embedding_array)
+        clustering = MeanShift(bandwidth=bandwidth).fit(embedding_array)
         num_clusters = clustering.cluster_centers_.shape[0]
         for k in range(num_clusters):
             # choose the frame closest to the cluster

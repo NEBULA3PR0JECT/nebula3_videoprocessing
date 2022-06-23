@@ -237,6 +237,14 @@ class NEBULA_SCENE_DETECTOR():
                     scene_element[0], scene_element[1])
                 scene_mdfs.append(chosen_mdf)
             mdfs.append(scene_mdfs)
+        elif method == 'meanshift':
+            mdfs = []
+            for scene_element in scene_elements:
+                scene_mdfs = []
+                chosen_mdf, ret_img = scene_detector.video_utils.choose_frames_with_meanshift(video_file,
+                    scene_element[0], scene_element[1])
+                scene_mdfs.append(chosen_mdf)
+            mdfs.append(scene_mdfs)
         else:
             raise Exception('Unsupported method')
         # mdfs = []
@@ -339,7 +347,7 @@ class NEBULA_SCENE_DETECTOR():
                     RETURN { doc: NEW, type: OLD ? \'update\' : \'insert\' }'
         scene_elements = self.detect_scene_elements(full_path)
         for idx_scene_element, scene_element in enumerate(scene_elements):
-            mdfs = self.detect_mdf(full_path, [scene_element])
+            mdfs = self.detect_mdf(full_path, [scene_element], method='meanshift')
             mdf_outputs = []
             img_caption_outputs = {}
             for mdf in mdfs:
@@ -386,7 +394,7 @@ class NEBULA_SCENE_DETECTOR():
             scene_element_idx = movie['scene_element']
             scene_element = self.playground_instance.get_movie_info(movie_id=movie_id)[0]['scene_elements'][scene_element_idx]
             full_path = os.path.join("/dataset/development",movie['url'].split("/")[-1])
-            mdfs = self.detect_mdf(full_path, [scene_element])
+            mdfs = self.detect_mdf(full_path, [scene_element], method='meanshift')
             mdf_outputs = []
             img_caption_outputs = {}
             for mdf in mdfs:
@@ -453,7 +461,7 @@ class NEBULA_SCENE_DETECTOR():
                         'url': url,
                         'scenes': self.detect_scenes(full_path),
                         'scene_elements': scene_elements,
-                        'mdfs': self.detect_mdf(full_path, scene_elements),
+                        'mdfs': self.detect_mdf(full_path, scene_elements, method='meanshift'),
                         'metadata': self.get_video_metadata(full_path),
                         'source': source
                         }
@@ -927,6 +935,7 @@ def single_mdf_selection():
         mdfs_new = scene_detector.detect_mdf(os.path.join(base_folder, scene), [scene_element], '1frame')
         mdfs_new = scene_detector.detect_mdf(os.path.join(base_folder, scene), [scene_element], 'fft_center')
         mdfs_new = scene_detector.detect_mdf(os.path.join(base_folder, scene), [scene_element], 'fft_border')
+        mdfs_new = scene_detector.detect_mdf(os.path.join(base_folder, scene), [scene_element], 'meanshift')
         print(mdfs_new)
 
 def test_mdf_selection():
