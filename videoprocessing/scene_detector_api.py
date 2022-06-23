@@ -241,9 +241,13 @@ class NEBULA_SCENE_DETECTOR():
             mdfs = []
             for scene_element in scene_elements:
                 scene_mdfs = []
-                chosen_mdf, ret_img = scene_detector.video_utils.choose_frames_with_meanshift(video_file,
+                chosen_mdf, ret_img, cluster_size = scene_detector.video_utils.choose_frames_with_meanshift(video_file,
                     scene_element[0], scene_element[1])
-                scene_mdfs.append(chosen_mdf)
+                sorted_by_size = list(np.argsort(cluster_size)[::-1])
+                ret_mdf = []
+                for k in sorted_by_size:
+                    ret_mdf.append(chosen_mdf[k])
+                scene_mdfs.append(ret_mdf)
             mdfs.append(scene_mdfs)
         else:
             raise Exception('Unsupported method')
