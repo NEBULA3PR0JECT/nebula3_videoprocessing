@@ -122,7 +122,7 @@ class ClipVideoUtils:
         num_clusters = clustering.cluster_centers_.shape[0]
         ret_cluster_size = []
         for k in range(num_clusters):
-            cluster_size = clustering.labels_.count(k)
+            cluster_size = list(clustering.labels_).count(k)
             ret_cluster_size.append(cluster_size)
             # choose the frame closest to the cluster
             dist_emb = embedding_array - np.matmul(np.ones((embedding_array.shape[0], 1)),
