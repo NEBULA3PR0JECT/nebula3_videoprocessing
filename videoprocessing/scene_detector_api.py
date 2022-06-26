@@ -5,7 +5,7 @@ from scenedetect.video_splitter import split_video_ffmpeg, is_ffmpeg_available
 from scenedetect import VideoManager, scene_detector
 # For content-aware scene detection:
 from scenedetect import SceneManager
-from scenedetect.detectors import ContentDetector
+from scenedetect.detectors import ContentDetector, AdaptiveDetector
 from pickle import STACK_GLOBAL
 import cv2
 import os
@@ -60,12 +60,13 @@ class NEBULA_SCENE_DETECTOR():
 
 
     def detect_scene_elements(self, video_file, method='scene_manager'):
-        print("DEBUG: ", video_file)
+        print("DEBUG: method", video_file, method)
         scenes = []
         if method == 'scene_manager':
                 video_manager = VideoManager([video_file])
                 scene_manager = SceneManager()
-                scene_manager.add_detector(ContentDetector(threshold=30.0))
+                # scene_manager.add_detector(ContentDetector(threshold=30.0)) # HK was 30.0
+                scene_manager.add_detector(AdaptiveDetector(adaptive_threshold=3.0)) # HK was 30.0
             # Improve processing speed by downscaling before processing.
                 video_manager.set_downscale_factor()
             # Start the video manager and perform the scene detection.
@@ -84,6 +85,7 @@ class NEBULA_SCENE_DETECTOR():
             scenes = []
             for boundary in boundaries:
                 scenes.append([boundary[0], boundary[1]])
+            print("Scenes elements: ", scenes)
 
         return(scenes)
 
@@ -847,41 +849,46 @@ def create_mdf_string_save_img(method, scene_element, file_name, scene_detector,
 
 
 def test_different_thresholds():
-    base_folder = '/dataset/lsmdc/avi/'
-    scenes = ["2054_Harry_Potter_and_the_prisoner_of_azkaban/2054_Harry_Potter_and_the_prisoner_of_azkaban_01.03.14.878-01.03.15.557.avi",
-            "2054_Harry_Potter_and_the_prisoner_of_azkaban/2054_Harry_Potter_and_the_prisoner_of_azkaban_00.06.36.732-00.06.38.382.avi",
-            "2054_Harry_Potter_and_the_prisoner_of_azkaban/2054_Harry_Potter_and_the_prisoner_of_azkaban_00.38.04.753-00.38.05.740.avi",
-            "2054_Harry_Potter_and_the_prisoner_of_azkaban/2054_Harry_Potter_and_the_prisoner_of_azkaban_01.28.07.709-01.28.11.284.avi",
-            "2054_Harry_Potter_and_the_prisoner_of_azkaban/2054_Harry_Potter_and_the_prisoner_of_azkaban_02.01.22.526-02.01.26.569.avi",
-            "0027_The_Big_Lebowski/0027_The_Big_Lebowski_01.29.38.129-01.29.39.478.avi",
-            "0027_The_Big_Lebowski/0027_The_Big_Lebowski_00.40.50.502-00.40.54.662.avi",
-            "0027_The_Big_Lebowski/0027_The_Big_Lebowski_01.41.05.074-01.41.10.316.avi",
-            "0027_The_Big_Lebowski/0027_The_Big_Lebowski_00.29.44.261-00.29.45.192.avi",
-            "0027_The_Big_Lebowski/0027_The_Big_Lebowski_01.34.35.180-01.34.39.204.avi",
-            "2012_Unbreakable/2012_Unbreakable_00.42.07.783-00.42.09.797.avi",
-            "2012_Unbreakable/2012_Unbreakable_00.44.24.867-00.44.27.970.avi",
-            "2012_Unbreakable/2012_Unbreakable_01.10.54.862-01.10.58.055.avi",
-            "2012_Unbreakable/2012_Unbreakable_00.37.46.880-00.37.54.563.avi",
-            "2012_Unbreakable/2012_Unbreakable_00.22.05.930-00.22.21.541.avi",
-            "1035_The_Adjustment_Bureau/1035_The_Adjustment_Bureau_01.35.24.597-01.35.30.366.avi",
-            "1035_The_Adjustment_Bureau/1035_The_Adjustment_Bureau_01.16.27.938-01.16.34.205.avi",
-            "1035_The_Adjustment_Bureau/1035_The_Adjustment_Bureau_01.18.25.654-01.18.29.908.avi",
-            "1035_The_Adjustment_Bureau/1035_The_Adjustment_Bureau_01.29.55.922-01.29.58.607.avi",
-            "1035_The_Adjustment_Bureau/1035_The_Adjustment_Bureau_01.17.00.907-01.17.04.533.avi",
-            "1038_The_Great_Gatsby/1038_The_Great_Gatsby_00.30.55.942-00.30.58.377.avi",
-            "1038_The_Great_Gatsby/1038_The_Great_Gatsby_00.58.36.915-00.58.39.961.avi",
-            "1038_The_Great_Gatsby/1038_The_Great_Gatsby_00.55.06.930-00.55.09.734.avi",
-            "1038_The_Great_Gatsby/1038_The_Great_Gatsby_01.33.48.154-01.33.49.634.avi",
-            "1038_The_Great_Gatsby/1038_The_Great_Gatsby_01.16.18.342-01.16.20.510.avi",
-            "0022_Reservoir_Dogs/0022_Reservoir_Dogs_00.09.45.850-00.09.47.403.avi",
-            "0022_Reservoir_Dogs/0022_Reservoir_Dogs_00.05.27.265-00.05.29.057.avi",
-            "0022_Reservoir_Dogs/0022_Reservoir_Dogs_01.13.30.094-01.13.33.419.avi",
-            "0022_Reservoir_Dogs/0022_Reservoir_Dogs_01.19.21.502-01.19.23.673.avi",
-            "0022_Reservoir_Dogs/0022_Reservoir_Dogs_00.58.40.019-00.58.52.999.avi"]
+    base_folder = '/notebooks/dataset' #'/home/hanoch/dataset/msr_vtt'
+    # scenes = ["2054_Harry_Potter_and_the_prisoner_of_azkaban/2054_Harry_Potter_and_the_prisoner_of_azkaban_01.03.14.878-01.03.15.557.avi",
+    #         "2054_Harry_Potter_and_the_prisoner_of_azkaban/2054_Harry_Potter_and_the_prisoner_of_azkaban_00.06.36.732-00.06.38.382.avi",
+    #         "2054_Harry_Potter_and_the_prisoner_of_azkaban/2054_Harry_Potter_and_the_prisoner_of_azkaban_00.38.04.753-00.38.05.740.avi",
+    #         "2054_Harry_Potter_and_the_prisoner_of_azkaban/2054_Harry_Potter_and_the_prisoner_of_azkaban_01.28.07.709-01.28.11.284.avi",
+    #         "2054_Harry_Potter_and_the_prisoner_of_azkaban/2054_Harry_Potter_and_the_prisoner_of_azkaban_02.01.22.526-02.01.26.569.avi",
+    #         "0027_The_Big_Lebowski/0027_The_Big_Lebowski_01.29.38.129-01.29.39.478.avi",
+    #         "0027_The_Big_Lebowski/0027_The_Big_Lebowski_00.40.50.502-00.40.54.662.avi",
+    #         "0027_The_Big_Lebowski/0027_The_Big_Lebowski_01.41.05.074-01.41.10.316.avi",
+    #         "0027_The_Big_Lebowski/0027_The_Big_Lebowski_00.29.44.261-00.29.45.192.avi",
+    #         "0027_The_Big_Lebowski/0027_The_Big_Lebowski_01.34.35.180-01.34.39.204.avi",
+    #         "2012_Unbreakable/2012_Unbreakable_00.42.07.783-00.42.09.797.avi",
+    #         "2012_Unbreakable/2012_Unbreakable_00.44.24.867-00.44.27.970.avi",
+    #         "2012_Unbreakable/2012_Unbreakable_01.10.54.862-01.10.58.055.avi",
+    #         "2012_Unbreakable/2012_Unbreakable_00.37.46.880-00.37.54.563.avi",
+    #         "2012_Unbreakable/2012_Unbreakable_00.22.05.930-00.22.21.541.avi",
+    #         "1035_The_Adjustment_Bureau/1035_The_Adjustment_Bureau_01.35.24.597-01.35.30.366.avi",
+    #         "1035_The_Adjustment_Bureau/1035_The_Adjustment_Bureau_01.16.27.938-01.16.34.205.avi",
+    #         "1035_The_Adjustment_Bureau/1035_The_Adjustment_Bureau_01.18.25.654-01.18.29.908.avi",
+    #         "1035_The_Adjustment_Bureau/1035_The_Adjustment_Bureau_01.29.55.922-01.29.58.607.avi",
+    #         "1035_The_Adjustment_Bureau/1035_The_Adjustment_Bureau_01.17.00.907-01.17.04.533.avi",
+    #         "1038_The_Great_Gatsby/1038_The_Great_Gatsby_00.30.55.942-00.30.58.377.avi",
+    #         "1038_The_Great_Gatsby/1038_The_Great_Gatsby_00.58.36.915-00.58.39.961.avi",
+    #         "1038_The_Great_Gatsby/1038_The_Great_Gatsby_00.55.06.930-00.55.09.734.avi",
+    #         "1038_The_Great_Gatsby/1038_The_Great_Gatsby_01.33.48.154-01.33.49.634.avi",
+    #         "1038_The_Great_Gatsby/1038_The_Great_Gatsby_01.16.18.342-01.16.20.510.avi",
+    #         "0022_Reservoir_Dogs/0022_Reservoir_Dogs_00.09.45.850-00.09.47.403.avi",
+    #         "0022_Reservoir_Dogs/0022_Reservoir_Dogs_00.05.27.265-00.05.29.057.avi",
+    #         "0022_Reservoir_Dogs/0022_Reservoir_Dogs_01.13.30.094-01.13.33.419.avi",
+    #         "0022_Reservoir_Dogs/0022_Reservoir_Dogs_01.19.21.502-01.19.23.673.avi",
+    #         "0022_Reservoir_Dogs/0022_Reservoir_Dogs_00.58.40.019-00.58.52.999.avi"]
+    scenes = [os.path.join(base_folder, x) for x in os.listdir(base_folder)
+                        if x.endswith('avi') or x.endswith('mp4')]
 
     # Go over all chosen scenes and choose the frames
-    save_folder = '/home/migakol/data/blur_comp'
-    out_file_csv = open(os.path.join(save_folder, 'result_csv.csv'), 'w')
+    save_folder = '/home/hanoch/dataset/msr_vtt/results'
+    if not os.path.exists(save_folder):
+        os.makedirs(save_folder)
+
+    out_file_csv = open(os.path.join(save_folder, 'result_csv2.csv'), 'w')
     # fieldnames = ['movie name', 'scenes', '1frame', 'fft_center', 'fft_border']
     fieldnames = ['movie name', 'scenes', 'clip_mdf']
     writer = csv.DictWriter(out_file_csv, fieldnames=fieldnames)
@@ -892,27 +899,43 @@ def test_different_thresholds():
     for scene in scenes:
         # scene here is a short video
         # Detect scenes using the old method (visual change based scene detector)
-        scene_elements_old = scene_detector.detect_scene_elements(os.path.join(base_folder, scene))
+        scene_elements_old = scene_detector.detect_scene_elements(scene)#, method='clip') # HK method was not defined 
         # Go over all the old scenes and detect MDFs using two different methods
         mdfs_fft_center_scenes = ''
         mdfs_fft_border_scenes = ''
         mdfs_1frame_scenes = ''
         clip_mdf = ''
-        for idx_scene_element, scene_element in enumerate(scene_elements_old):
-            if scene_element[1] - scene_element[0] < 4:
-                continue
-            chosen_mdf, ret_img = scene_detector.video_utils.choose_best_frame(os.path.join(base_folder, scene),
-                            scene_element[0], scene_element[1])
-            clip_mdf = clip_mdf + ' ' + str(chosen_mdf)
-            imgname = scene[scene.find('/') + 1:scene.rfind('.')] + f'_old_scene_{chosen_mdf:04}.jpg'
-            cv2.imwrite(os.path.join(save_folder, imgname), ret_img[0])
+        mdf_det = False # fallback to original
 
-            # mdfs_fft_center_scenes = mdfs_fft_center_scenes + ' ' + create_mdf_string_save_img('fft_center',
-            #         scene_element, os.path.join(base_folder, scene), scene_detector, scene, save_folder)
-            # mdfs_fft_border_scenes = mdfs_fft_border_scenes + ' ' + create_mdf_string_save_img('fft_border',
-            #         scene_element, os.path.join(base_folder, scene), scene_detector, scene, save_folder)
-            # mdfs_1frame_scenes = mdfs_1frame_scenes + ' ' + create_mdf_string_save_img('1frame',
-            #         scene_element, os.path.join(base_folder, scene), scene_detector, scene, save_folder)
+        if mdf_det:
+            full_path = os.path.join(base_folder, scene)
+            mdfs = scene_detector.detect_mdf(full_path, [scene_elements_old], method='meanshift')
+            mdf_outputs = []
+            img_caption_outputs = {}
+            for mdf in mdfs:
+                mdf_images_path = scene_detector.save_mdfs_to_jpg(full_path, mdf, save_path=save_folder)
+                if mdf_images_path:
+                    print("ka")
+            
+        else:
+            for idx_scene_element, scene_element in enumerate(scene_elements_old):
+                if scene_element[1] - scene_element[0] < 4:
+                    continue
+                chosen_mdf, ret_img = scene_detector.video_utils.choose_best_frame(os.path.join(base_folder, scene),
+                                scene_element[0], scene_element[1])
+                clip_mdf = clip_mdf + ' ' + str(chosen_mdf)
+                imgname = scene[scene.find('/') + 1:scene.rfind('.')] + f'_old_scene_{chosen_mdf:04}.jpg'
+                imgname = os.path.basename(imgname)
+                ret = cv2.imwrite(os.path.join(save_folder, imgname), ret_img[0])
+                if ret:
+                    print("Saved ", os.path.join(save_folder, imgname))
+
+                # mdfs_fft_center_scenes = mdfs_fft_center_scenes + ' ' + create_mdf_string_save_img('fft_center',
+                #         scene_element, os.path.join(base_folder, scene), scene_detector, scene, save_folder)
+                # mdfs_fft_border_scenes = mdfs_fft_border_scenes + ' ' + create_mdf_string_save_img('fft_border',
+                #         scene_element, os.path.join(base_folder, scene), scene_detector, scene, save_folder)
+                # mdfs_1frame_scenes = mdfs_1frame_scenes + ' ' + create_mdf_string_save_img('1frame',
+                #         scene_element, os.path.join(base_folder, scene), scene_detector, scene, save_folder)
 
         scene_element_old_str = ''
         for scene_element in scene_elements_old:
