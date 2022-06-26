@@ -233,22 +233,24 @@ class NEBULA_SCENE_DETECTOR():
             mdfs = []
             for scene_element in scene_elements:
                 scene_mdfs = []
-                chosen_mdf, ret_img = scene_detector.video_utils.choose_best_frame(video_file,
+                chosen_mdf, ret_img = self.video_utils.choose_best_frame(video_file,
                     scene_element[0], scene_element[1])
                 scene_mdfs.append(chosen_mdf)
             mdfs.append(scene_mdfs)
         elif method == 'meanshift':
             mdfs = []
+            ret_imgs = []
             for scene_element in scene_elements:
                 scene_mdfs = []
-                chosen_mdf, ret_img, cluster_size = scene_detector.video_utils.choose_frames_with_meanshift(video_file,
+                return_img_list = []
+                chosen_mdf, ret_img, cluster_size = self.video_utils.choose_frames_with_meanshift(video_file,
                     scene_element[0], scene_element[1])
                 sorted_by_size = list(np.argsort(cluster_size)[::-1])
-                ret_mdf = []
                 for k in sorted_by_size:
-                    ret_mdf.append(chosen_mdf[k])
-                scene_mdfs.append(ret_mdf)
-            mdfs.append(scene_mdfs)
+                    scene_mdfs.append(chosen_mdf[k])
+                    return_img_list.append(ret_img[k])
+                ret_imgs.append(return_img_list)
+                mdfs.append(scene_mdfs)
         else:
             raise Exception('Unsupported method')
         # mdfs = []
@@ -845,6 +847,12 @@ def create_mdf_string_save_img(method, scene_element, file_name, scene_detector,
 
     return mdf_string
 
+def paperspace_playground():
+    base_folder = '/datasets/msrvtt'
+    video = 'video291.mp4'
+    scene_detector = NEBULA_SCENE_DETECTOR(use_ClipCap=False, use_OFA=False, use_nebula3=False)
+    scene_elements = scene_detector.detect_scene_elements(os.path.join(base_folder, video))
+    scene_detector.detect_mdf(os.path.join(base_folder, video), scene_elements, method='meanshift')
 
 def test_different_thresholds():
     base_folder = '/dataset/lsmdc/avi/'
@@ -1137,14 +1145,38 @@ def main():
 
 if __name__ == "__main__":
 
+    # from transformers import pipeline
+    # unmasker = pipeline('fill-mask', model='bert-large-uncased-whole-word-masking')
+    # a = unmasker("Man [MASK] a chair.")
+
     parser = argparse.ArgumentParser(description='Scene detection API')
     parser.add_argument('--test_mdf', action='store_true')
     args = parser.parse_args()
+    #
+    # from transformers import BertTokenizer
+    # from transformers import BertForMaskedLM
+    # import numpy as np
+    # import torch
+    # import torch.nn as nn
+    #
+    # tokenizer = BertTokenizer.from_pretrained('bert-base-cased')
+    # model = BertForMaskedLM.from_pretrained('bert-base-cased')
+    #
+    # textb = "Man [MASK] a chair."
+    # tokenized_text = tokenizer.tokenize(textb)
+    # tensor_input = torch.tensor([tokenizer.convert_tokens_to_ids(tokenized_text)])
+    # output = model(tensor_input)
+    #
+    # prediction_scores = output[0]
+    # softmax = nn.Softmax(dim=0)
+    # tokenizer.decode([np.argmax(output.logits[:, 1, :].detach().numpy())])
+
 
     if args.test_mdf:
         # test_mdf_selection()
         # single_mdf_selection()
-        test_different_thresholds()
+        # test_different_thresholds()
+        paperspace_playground()
     else:
         main()
 
