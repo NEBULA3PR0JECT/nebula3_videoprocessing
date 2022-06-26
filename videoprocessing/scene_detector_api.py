@@ -899,7 +899,7 @@ def test_different_thresholds():
     for scene in scenes:
         # scene here is a short video
         # Detect scenes using the old method (visual change based scene detector)
-        scene_elements_old = scene_detector.detect_scene_elements(scene)#, method='clip') # HK method was not defined 
+        scene_elements_old = scene_detector.detect_scene_elements(scene)
         # Go over all the old scenes and detect MDFs using two different methods
         mdfs_fft_center_scenes = ''
         mdfs_fft_border_scenes = ''
