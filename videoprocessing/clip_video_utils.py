@@ -120,7 +120,10 @@ class ClipVideoUtils:
         embedding_array, fps = self.get_embedding_diffs(movie_name, start_frame, end_frame, 0)
         clustering = MeanShift(bandwidth=bandwidth).fit(embedding_array)
         num_clusters = clustering.cluster_centers_.shape[0]
+        ret_cluster_size = []
         for k in range(num_clusters):
+            cluster_size = list(clustering.labels_).count(k)
+            ret_cluster_size.append(cluster_size)
             # choose the frame closest to the cluster
             dist_emb = embedding_array - np.matmul(np.ones((embedding_array.shape[0], 1)),
                                         np.reshape(clustering.cluster_centers_[k, :], (1, embedding_array.shape[1])))
@@ -130,7 +133,7 @@ class ClipVideoUtils:
             ret_frame_list.append(ret)
             ret_image_list.append(ret_img)
 
-        return ret_frame_list, ret_image_list
+        return ret_frame_list, ret_image_list, ret_cluster_size
 
     def choose_best_frame(self, movie_name, start_frame, end_frame):
         """
