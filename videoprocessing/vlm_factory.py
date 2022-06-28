@@ -1,4 +1,4 @@
-from nebula3_videoprocessing.videoprocessing.vlm_implementation import ClipVlmImplementation, BlipVlmImplementation
+from nebula3_videoprocessing.videoprocessing.vlm_implementation import ClipVlmImplementation, BlipItcVlmImplementation, BlipItmVlmImplementation
 from nebula3_videoprocessing.videoprocessing.utils.singleton import Singleton
 
 class VlmFactory:
@@ -6,7 +6,8 @@ class VlmFactory:
     def __init__(self, metaclass=Singleton): 
         self.vlm_map = {
             'clip': ClipVlmImplementation,
-            'blip': BlipVlmImplementation
+            'blip_itc': BlipItcVlmImplementation,
+            'blip_itm': BlipItmVlmImplementation
         }
 
     def register_vlm(self, vlm_name):
@@ -30,15 +31,14 @@ class VlmFactory:
 
         return creator
 
-def main():
-    vlm1 = VlmFactory().get_vlm("clip")
-    print(vlm1)
-    main1()
+# def main():
+#     vlm1 = VlmFactory().get_vlm("clip")
+#     print(vlm1)
+#     main1()
 
-def main1():
-    vlm2 = VlmFactory().get_vlm("clip")
-    print(vlm2)
+# def main1():
+#     vlm2 = VlmFactory().get_vlm("clip")
+#     print(vlm2)
     
-if __name__ == "__main__":
-    # main()
-    pass
+# if __name__ == "__main__":
+#     main()
