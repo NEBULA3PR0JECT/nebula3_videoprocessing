@@ -68,6 +68,7 @@ class SingleOntologyImplementation(OntologyInterface):
                     outputs.append((texts[i + j], score))
         
         outputs.sort(key=lambda a: a[1], reverse=True)
+        print(f"Top 5: {outputs[:5]}")
         return outputs
     
 
@@ -77,7 +78,7 @@ def main():
     
     ontology_implementation = SingleOntologyImplementation('objects', 'clip')
 
-    image = ontology_implementation.vlm.load_image("https://storage.googleapis.com/sfr-vision-language-research/BLIP/demo.jpg")
+    image = ontology_implementation.vlm.load_image_url("https://storage.googleapis.com/sfr-vision-language-research/BLIP/demo.jpg")
     ontology_implementation.compute_scores(image)
 
 if __name__ == "__main__":
