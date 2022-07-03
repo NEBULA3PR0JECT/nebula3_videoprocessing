@@ -1,6 +1,7 @@
 from nebula3_videoprocessing.videoprocessing.utils.singleton import Singleton
 from nebula3_videoprocessing.videoprocessing.utils import consts
 import json
+import numpy as np
 class OntologyFactory:
     _creators = {}
     def __init__(self, metaclass=Singleton): 
@@ -15,6 +16,13 @@ class OntologyFactory:
             'vg_verbs': consts.vg_verb_json_path
         }
 
+    def preprocess_ontology(self, ontology_path):
+        with open(ontology_path, "r") as f:
+            vgenome_obj_ontology = json.load(f)
+            vgenome_obj_ontology = np.unique(vgenome_obj_ontology)
+            vgenome_obj_ontology = sorted(vgenome_obj_ontology)
+        return vgenome_obj_ontology
+
     def register_ontology(self, ontology_name):
         try:
             ontology_implementation = self.ontology_map[ontology_name]
@@ -22,7 +30,7 @@ class OntologyFactory:
                 dict_keys = self.ontology_map.keys()
                 raise Exception("ontology not found. please use on of these keys: {}".format(dict_keys))    
 
-        self._creators[ontology_name] = json.load(open(ontology_implementation))
+        self._creators[ontology_name] = self.preprocess_ontology(ontology_implementation)
 
 
     def get_ontology(self, ontology_name):

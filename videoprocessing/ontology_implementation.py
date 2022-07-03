@@ -55,20 +55,20 @@ class SingleOntologyImplementation(OntologyInterface):
         texts = [self.prompt_functions[self.ontology_name](t) for t in self.ontology]
 
         # If VLM crashes, you can extend 10 to bigger number.
-        div_texts = len(texts) // 10
+        div_texts = len(texts) // 4
         len_texts = len(texts) 
         for i in range(0, len_texts, div_texts):
             if (i + div_texts) > len_texts:
                 scores = self.vlm.compute_similarity(image, texts[i:i + (len_texts - i)])
                 for j, score in enumerate(scores):
-                    outputs.append((texts[i + j], score))
+                    outputs.append((self.ontology[i + j], score))
             else:
                 scores = self.vlm.compute_similarity(image, texts[i:i + div_texts])
                 for j, score in enumerate(scores):
-                    outputs.append((texts[i + j], score))
+                    outputs.append((self.ontology[i + j], score))
         
-        outputs.sort(key=lambda a: a[1], reverse=True)
-        print(f"Top 5: {outputs[:5]}")
+        # outputs.sort(key=lambda a: a[1], reverse=True)
+        # print(f"Top 5: {outputs[:5]}")
         return outputs
     
 
