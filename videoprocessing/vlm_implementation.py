@@ -6,7 +6,7 @@ import requests
 import torch
 
 from transformers import CLIPProcessor, CLIPModel
-from models.blip_itm import blip_itm
+from nebula3_vlmtokens_expert.vlmtokens.models.blip_itm import blip_itm
 from torchvision import transforms
 from torchvision.transforms.functional import InterpolationMode
 
@@ -23,6 +23,11 @@ class ClipVlmImplementation(VlmBaseImplementation):
     def __init__(self):
         self.model = CLIPModel.from_pretrained(config["clip_checkpoints"])
         self.processor = CLIPProcessor.from_pretrained(config["clip_checkpoints"])
+
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.model.eval()
+        self.model = self.model.to(device=self.device)
+
 
     def load_image_url(self, url: str):
         return Image.open(requests.get(url, stream=True).raw)  
