@@ -856,6 +856,11 @@ def paperspace_playground():
     scene_elements = scene_detector.detect_scene_elements(os.path.join(base_folder, video))
     scene_detector.detect_mdf(os.path.join(base_folder, video), scene_elements, method='meanshift')
 
+    base_folder = '/home/paperspace/data/videos'
+
+
+
+
 def test_different_thresholds():
     base_folder = '/notebooks/dataset' #'/home/hanoch/dataset/msr_vtt'
     # scenes = ["2054_Harry_Potter_and_the_prisoner_of_azkaban/2054_Harry_Potter_and_the_prisoner_of_azkaban_01.03.14.878-01.03.15.557.avi",
