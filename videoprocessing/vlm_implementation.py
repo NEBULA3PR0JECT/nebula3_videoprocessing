@@ -107,13 +107,8 @@ class BlipItcVlmImplementation(VlmBaseImplementation):
     def compute_similarity(self, image : Image, text : list[str]):
         image = self.load_image(image)
         outputs = []
-        for txt in text:
-            caption = txt
+        outputs = self.model(image, text, match_head='itc')
 
-            itc_output = self.model(image,caption, match_head='itc')
-            # Check if its dotproduct
-            itc_score = itc_output.cpu().detach().numpy()[0][0]
-            outputs.append(itc_score)
         return outputs[0]
 
 
