@@ -194,7 +194,7 @@ class ClipVideoUtils:
         max_v = []
         len_v = []
         while cap.isOpened() and ret:
-            if frame_num >= start_frame and frame_num <= end_frame:
+            if frame_num >= start_frame and frame_num < end_frame:
                 gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
                 dst = cv.GaussianBlur(gray, (3, 3), cv.BORDER_DEFAULT)
                 fm = cv.Laplacian(dst, cv.CV_64F).var()

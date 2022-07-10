@@ -180,6 +180,8 @@ class NEBULA_SCENE_DETECTOR():
                 stop_frame = scene_element[1]
                 blur_threshold, values, fft_center, fft_border = self.video_utils.get_adaptive_movie_threshold(video_file,
                     start_frame, stop_frame)
+                # Don't take the first or the last frame
+                # values[0] = values[-1] = -1
                 scene_mdfs.append(np.argmax(values) + scene_element[0])
                 mdfs.append(scene_mdfs)
             pass
@@ -850,13 +852,96 @@ def create_mdf_string_save_img(method, scene_element, file_name, scene_detector,
     return mdf_string
 
 def paperspace_playground():
-    base_folder = '/datasets/msrvtt'
-    video = 'video291.mp4'
-    scene_detector = NEBULA_SCENE_DETECTOR(use_ClipCap=False, use_OFA=False, use_nebula3=False)
-    scene_elements = scene_detector.detect_scene_elements(os.path.join(base_folder, video))
-    scene_detector.detect_mdf(os.path.join(base_folder, video), scene_elements, method='meanshift')
-
+    import datetime
+    # base_folder = '/datasets/msrvtt'
     base_folder = '/home/paperspace/data/videos'
+    outfolder = '/home/paperspace/data/mdfs'
+
+    videos = os.listdir(base_folder)
+
+    scene_detector = NEBULA_SCENE_DETECTOR(use_ClipCap=False, use_OFA=False, use_nebula3=False)
+
+    out_file_csv = open(os.path.join(outfolder, 'result_csv2.csv'), 'w')
+    fieldnames = ['movie name', 'scenes_adaptive', 'scenes_clip', 'time_adaptive', 'time_clip', 'mdf_clip', 'mdf_laplacian',
+                  'time_mdf_clip', 'time_mdf_laplacian']
+    writer = csv.DictWriter(out_file_csv, fieldnames=fieldnames)
+    writer.writerow({'movie name': 'movie name',
+                     'scenes_adaptive': 'scenes_adaptive',
+                     'scenes_clip': 'scenes_clip',
+                     'time_adaptive': 'time_adaptive',
+                     'time_clip': 'time_clip',
+                     'mdf_clip': 'mdf_clip',
+                     'mdf_laplacian': 'mdf_laplacian',
+                     'time_mdf_clip': 'time_mdf_clip',
+                     'time_mdf_laplacian': 'time_mdf_laplacian'})
+
+    for video in videos:
+        start_time = datetime.datetime.now()
+        scene_elements_adaptive = scene_detector.detect_scene_elements(os.path.join(base_folder, video))
+        adaptive_diff = (datetime.datetime.now() - start_time).total_seconds()
+        start_time = datetime.datetime.now()
+        scene_elements_clip = scene_detector.detect_scene_elements(os.path.join(base_folder, video), method='clip')
+        clip_diff = (datetime.datetime.now() - start_time).total_seconds()
+
+        start_time = datetime.datetime.now()
+        frame1_mdfs = scene_detector.detect_mdf(os.path.join(base_folder, video), scene_elements_adaptive, method='1frame')
+        frame1_mdf_diff = (datetime.datetime.now() - start_time).total_seconds()
+
+        start_time = datetime.datetime.now()
+        old_clip_mdfs = scene_detector.detect_mdf(os.path.join(base_folder, video), scene_elements_adaptive, method='meanshift')
+        clip_mdfs = []
+        for mdf in old_clip_mdfs:
+            clip_mdfs.append([mdf[0]])
+
+        clip_mdf_diff = (datetime.datetime.now() - start_time).total_seconds()
+
+
+        frames_to_save = scene_detector.video_utils.get_specific_frames(os.path.join(base_folder, video), clip_mdfs)
+        for k, frame in enumerate(frames_to_save):
+            imgname = video[:video.find('.')] + f'_clipmdf_{clip_mdfs[k][0]:04}.jpg'
+            ret = cv2.imwrite(os.path.join(outfolder, imgname), frame)
+
+
+        frames_to_save = scene_detector.video_utils.get_specific_frames(os.path.join(base_folder, video), frame1_mdfs)
+        for k, frame in enumerate(frames_to_save):
+            imgname = video[:video.find('.')] + f'_laplace_{frame1_mdfs[k][0]:04}.jpg'
+            ret = cv2.imwrite(os.path.join(outfolder, imgname), frame)
+
+        adaptive_string = ''
+        for scene_elem in scene_elements_adaptive:
+            adaptive_string = adaptive_string + ' ' + str(scene_elem[0]) + '-' + str(scene_elem[1]) + ','
+
+        clip_string = ''
+        for scene_elem in scene_elements_clip:
+            clip_string = clip_string + ' ' + str(scene_elem[0]) + '-' + str(scene_elem[1]) + ','
+
+        mdf_laplace_string = ''
+        for mdf in frame1_mdfs:
+            mdf_laplace_string = mdf_laplace_string + ' ' + str(mdf[0]) + ','
+
+        mdf_clip_string = ''
+        for mdf in clip_mdfs:
+            mdf_clip_string = mdf_clip_string + ' ' + str(mdf[0]) + ','
+
+        fieldnames = ['movie name', 'scenes_adaptive', 'scenes_clip', 'time_adaptive', 'time_clip', 'mdf_clip',
+                      'mdf_laplacian',
+                      'time_mdf_clip', 'time_mdf_laplacian']
+        writer.writerow({'movie name': video[:video.find('.')],
+                         'scenes_adaptive': adaptive_string,
+                         'scenes_clip': clip_string,
+                         'time_adaptive': str(adaptive_diff),
+                         'time_clip': str(clip_diff),
+                         'mdf_clip': mdf_clip_string,
+                        'mdf_laplacian': mdf_laplace_string,
+                        'time_mdf_clip': str(clip_mdf_diff),
+                         'time_mdf_laplacian': str(frame1_mdf_diff)})
+
+
+
+
+
+
+
 
 
 
