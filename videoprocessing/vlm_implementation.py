@@ -30,10 +30,14 @@ class ClipVlmImplementation(VlmBaseImplementation):
     def compute_similarity(self, image : Image, text : list[str]):
 
         inputs = self.processor(text=text, images=image, return_tensors="pt", padding=True)
-
+# Need to align all the inputs to the same device 
+        vv = dict()
+        [vv.update({k: v.to(device=self.device)}) for k, v in inputs.items()]
+        inputs = vv
+        
         outputs = self.model(**inputs)
         embeds_dotproduct = (outputs.image_embeds.expand_as(outputs.text_embeds) * outputs.text_embeds).sum(dim=1)
-        return embeds_dotproduct.detach().numpy()
+        return embeds_dotproduct.cpu().detach().numpy()
 
 class BlipItmVlmImplementation(VlmBaseImplementation):
     def __init__(self, init_with_cpu = True):

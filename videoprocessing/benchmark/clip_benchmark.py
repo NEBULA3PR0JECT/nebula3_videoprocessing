@@ -220,6 +220,7 @@ class NebulaVideoEvaluation:
         boundaries = []
         good_frame_per = []
         embedding_list = []
+        
         if embedding_array.shape[0] == 0:
             return embedding_list, boundaries
         self.ind_array = []
