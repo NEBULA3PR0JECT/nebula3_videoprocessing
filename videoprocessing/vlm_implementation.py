@@ -40,7 +40,7 @@ class ClipVlmImplementation(VlmBaseImplementation):
         return embeds_dotproduct.cpu().detach().numpy()
 
 class BlipItmVlmImplementation(VlmBaseImplementation):
-    def __init__(self, init_with_cpu = True):
+    def __init__(self, init_with_cpu = False):
 
         if init_with_cpu:
             print("Initializing model on CPU")
@@ -79,7 +79,7 @@ class BlipItmVlmImplementation(VlmBaseImplementation):
 
 
 class BlipItcVlmImplementation(VlmBaseImplementation):
-    def __init__(self, init_with_cpu = True):
+    def __init__(self, init_with_cpu = False):
         if init_with_cpu:
             print("Initializing model on CPU")
             self.device = 'cpu'
