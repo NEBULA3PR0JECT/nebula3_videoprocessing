@@ -6,7 +6,7 @@ import requests
 import torch
 
 from transformers import CLIPProcessor, CLIPModel
-from nebula3_vlmtokens_expert.vlmtokens.models.blip_itm import blip_itm
+from models.blip_itm import blip_itm
 from torchvision import transforms
 from torchvision.transforms.functional import InterpolationMode
 
@@ -24,11 +24,6 @@ class ClipVlmImplementation(VlmBaseImplementation):
         self.model = CLIPModel.from_pretrained(config["clip_checkpoints"])
         self.processor = CLIPProcessor.from_pretrained(config["clip_checkpoints"])
 
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.model = self.model.to(device=self.device)
-        self.model.eval()
-
-
     def load_image_url(self, url: str):
         return Image.open(requests.get(url, stream=True).raw)  
 
@@ -45,9 +40,14 @@ class ClipVlmImplementation(VlmBaseImplementation):
         return embeds_dotproduct.cpu().detach().numpy()
 
 class BlipItmVlmImplementation(VlmBaseImplementation):
-    def __init__(self):
+    def __init__(self, init_with_cpu = False):
 
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        if init_with_cpu:
+            print("Initializing model on CPU")
+            self.device = torch.device('cpu')
+        else:
+            print("Initializing model on GPU")
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         model = blip_itm(pretrained=config['blip_model_url_base'], image_size=config['blip_image_size'], vit=config['blip_vit_base'])
         model.eval()
@@ -69,22 +69,23 @@ class BlipItmVlmImplementation(VlmBaseImplementation):
     def compute_similarity(self, image: Image, text: list[str]):
         
         image = self.load_image(image)
-        outputs = []
-        for txt in text:
-            caption = txt
-            
-            itm_output = self.model(image, caption, match_head='itm')
-            # Change from softmax to dotproduct
-            itm_score = torch.nn.functional.softmax(itm_output,dim=1)[:,1]
-            itm_score = itm_score.cpu().detach().numpy()[0]
-            outputs.append(itm_score)
 
-        return outputs[0]
+        itm_output = self.model(image, text, match_head='itm')
+        # Change from softmax to dotproduct
+        itm_score = torch.nn.functional.softmax(itm_output,dim=1)[:,1]
+        itm_scores = itm_score.cpu().detach().numpy()
+
+        return itm_scores
 
 
 class BlipItcVlmImplementation(VlmBaseImplementation):
-    def __init__(self):
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    def __init__(self, init_with_cpu = False):
+        if init_with_cpu:
+            print("Initializing model on CPU")
+            self.device = 'cpu'
+        else:
+            print("Initializing model on GPU")
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         model = blip_itm(pretrained=config['blip_model_url_base'], image_size=config['blip_image_size'], vit=config['blip_vit_base'])
         model.eval()
@@ -106,10 +107,10 @@ class BlipItcVlmImplementation(VlmBaseImplementation):
 
     def compute_similarity(self, image : Image, text : list[str]):
         image = self.load_image(image)
-        outputs = []
-        outputs = self.model(image, text, match_head='itc')
-
-        return outputs[0]
+        itc_output = self.model(image, text, match_head='itc')
+        # Check if its dotproduct
+        itc_scores = itc_output.cpu().detach().numpy()[0]
+        return itc_scores
 
 
 def main():
@@ -144,4 +145,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # main()
+    pass
