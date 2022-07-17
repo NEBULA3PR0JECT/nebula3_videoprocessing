@@ -1255,6 +1255,16 @@ def main():
             # scene_detector.insert_movies_pipeline(full_path, url_link, source, db_name="ilan_test")
             scene_detector.insert_movie(full_path, url_link, source, db_name="prodemo")
 
+import clip
+def encode_text(clip_util, text):
+    text_token = torch.cat([clip.tokenize(text)]).to('cpu')
+    text_emb = clip_util.model.encode_text(text_token).detach().numpy()
+    text_emb = text_emb / np.linalg.norm(text_emb)
+    return text_emb
+
+def compare_text(clip_util, img_emb, text):
+    text_emb = encode_text(clip_util, text)
+    return np.sum(text_emb * img_emb)
 
 if __name__ == "__main__":
 
@@ -1284,6 +1294,12 @@ if __name__ == "__main__":
     # softmax = nn.Softmax(dim=0)
     # tokenizer.decode([np.argmax(output.logits[:, 1, :].detach().numpy())])
 
+    img_name = '/home/paperspace/data/coral_11.png'
+    clip_util = ClipVideoUtils()
+    frame = cv2.imread(img_name)
+    img = clip_util.preprocess(Image.fromarray(frame)).unsqueeze(0).to('cpu')
+    embeddings = clip_util.model.encode_image(img).detach().numpy()
+    embeddings = embeddings / np.linalg.norm(embeddings)
 
     if args.test_mdf:
         # test_mdf_selection()
