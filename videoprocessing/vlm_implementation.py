@@ -23,6 +23,9 @@ class ClipVlmImplementation(VlmBaseImplementation):
     def __init__(self):
         self.model = CLIPModel.from_pretrained(config["clip_checkpoints"])
         self.processor = CLIPProcessor.from_pretrained(config["clip_checkpoints"])
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.model = self.model.to(device=self.device)
+        self.model.eval()        
 
     def load_image_url(self, url: str):
         return Image.open(requests.get(url, stream=True).raw)  
@@ -49,7 +52,7 @@ class BlipItmVlmImplementation(VlmBaseImplementation):
             print("Initializing model on GPU")
             self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-        model = blip_itm(pretrained=config['blip_model_url_base'], image_size=config['blip_image_size'], vit=config['blip_vit_base'])
+        model = blip_itm(pretrained=config['blip_model_url_large'], image_size=config['blip_image_size'], vit=config['blip_vit_large'])
         model.eval()
         self.model = model.to(device=self.device)
     
@@ -87,7 +90,7 @@ class BlipItcVlmImplementation(VlmBaseImplementation):
             print("Initializing model on GPU")
             self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-        model = blip_itm(pretrained=config['blip_model_url_base'], image_size=config['blip_image_size'], vit=config['blip_vit_base'])
+        model = blip_itm(pretrained=config['blip_model_url_large'], image_size=config['blip_image_size'], vit=config['blip_vit_large'])
         model.eval()
         self.model = model.to(device=self.device)
     
