@@ -1294,12 +1294,12 @@ if __name__ == "__main__":
     # softmax = nn.Softmax(dim=0)
     # tokenizer.decode([np.argmax(output.logits[:, 1, :].detach().numpy())])
 
-    img_name = '/home/paperspace/data/coral_11.png'
-    clip_util = ClipVideoUtils()
-    frame = cv2.imread(img_name)
-    img = clip_util.preprocess(Image.fromarray(frame)).unsqueeze(0).to('cpu')
-    embeddings = clip_util.model.encode_image(img).detach().numpy()
-    embeddings = embeddings / np.linalg.norm(embeddings)
+    # img_name = '/home/paperspace/data/coral_11.png'
+    # clip_util = ClipVideoUtils()
+    # frame = cv2.imread(img_name)
+    # img = clip_util.preprocess(Image.fromarray(frame)).unsqueeze(0).to('cpu')
+    # embeddings = clip_util.model.encode_image(img).detach().numpy()
+    # embeddings = embeddings / np.linalg.norm(embeddings)
 
     if args.test_mdf:
         # test_mdf_selection()
