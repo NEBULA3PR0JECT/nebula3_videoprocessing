@@ -16,7 +16,7 @@ import csv
 from nebula3_database.movie_db import MOVIE_DB
 import tqdm
 from PIL import Image
-from nebula3_videoprocessing.videoprocessing.ontology_implementation import SingleOntologyImplementation, EnsembleOntologyImplementation
+# from nebula3_videoprocessing.videoprocessing.ontology_implementation import SingleOntologyImplementation, EnsembleOntologyImplementation
 from nebula3_videoprocessing.videoprocessing.vlm_factory import VlmFactory
 import nebula_vg_driver.visual_genome.local as vg
 import pandas as pd
@@ -624,11 +624,11 @@ class VG_EXPERIMENT:
                             global_persons: @global_persons, global_scenes: @global_scenes, source: @source\
                         } UPDATE {image_id: @image_id, url: @url, global_objects: @global_objects, global_captions: @global_captions,\
                             global_persons: @global_persons, global_scenes: @global_scenes, \
-                            source: @source} IN s3_tokens'
+                            source: @source} IN s3_global_tokens1'
                             
             img_url = os.path.join('https://cs.stanford.edu/people/rak248/VG_100K', img_id + '.jpg')
             bind_vars = {
-                            'image_id': img_id,
+                            'image_id': int(img_id),
                             'global_objects': {'blip' : img_ids_to_ontology[img_id]['objects']['blip']},
                             'global_captions': {'blip' : img_ids_to_ontology[img_id]['captions']['blip']},
                             'global_persons': {'blip' : img_ids_to_ontology[img_id]['persons']['blip']},
@@ -670,7 +670,7 @@ def main():
     persons_path = os.path.join(result_path_base, "results_blip_itc_persons_vg.csv")
     scenes_path = os.path.join(result_path_base, "results_blip_itc_scenes_vg.csv")
     ipc_path = "/storage/ipc_data/paragraphs_v1.json"
-    vg_experiment.insert_vg_experiments_to_db(objects_path, captions_path, persons_path, scenes_path, ipc_path, db_name="ilan_test")
-
+    a=0
+    # vg_experiment.insert_vg_experiments_to_db(objects_path, captions_path, persons_path, scenes_path, ipc_path, db_name="nebula_playground")
 if __name__ == '__main__':
     main()

@@ -20,24 +20,27 @@ class VlmBaseImplementation(VlmInterface):
     
 
 class ClipVlmImplementation(VlmBaseImplementation):
-    def __init__(self):
-        self.model = CLIPModel.from_pretrained(config["clip_checkpoints"])
+
+    def __init__(self, init_with_cpu=False):
+
+        if init_with_cpu:
+            print("Initializing model on CPU")
+            self.device = torch.device('cpu')
+        else:
+            print("Initializing model on GPU")
+            self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+        self.model = CLIPModel.from_pretrained(config["clip_checkpoints"]).to(device=self.device)
         self.processor = CLIPProcessor.from_pretrained(config["clip_checkpoints"])
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.model = self.model.to(device=self.device)
-        self.model.eval()        
+
 
     def load_image_url(self, url: str):
         return Image.open(requests.get(url, stream=True).raw)  
 
     def compute_similarity(self, image : Image, text : list[str]):
 
-        inputs = self.processor(text=text, images=image, return_tensors="pt", padding=True)
-# Need to align all the inputs to the same device 
-        vv = dict()
-        [vv.update({k: v.to(device=self.device)}) for k, v in inputs.items()]
-        inputs = vv
-        
+        inputs = self.processor(text=text, images=image, return_tensors="pt", padding=True).to(device=self.device)
+
         outputs = self.model(**inputs)
         embeds_dotproduct = (outputs.image_embeds.expand_as(outputs.text_embeds) * outputs.text_embeds).sum(dim=1)
         return embeds_dotproduct.cpu().detach().numpy()
@@ -114,6 +117,32 @@ class BlipItcVlmImplementation(VlmBaseImplementation):
         # Check if its dotproduct
         itc_scores = itc_output.cpu().detach().numpy()[0]
         return itc_scores
+    
+    class VisualGroundingVlmImplementation(VlmInterface):
+        def __init__(self):
+            self.vg_engine = OfaMultiModalVisualGrounding()
+        
+        def load_image(self):
+            pass
+
+        def compute_similarity(self, image : Image, text : list[str]):
+            time_measure = False
+            if time_measure:
+                import time
+                since = time.time()
+
+            bb, _, lprob = self.vg_engine.find_visual_grounding(image, text)
+
+            if time_measure:
+                time_elapsed = time.time() - since
+                print('OFa VG time {:.3f}s'.format(time_elapsed))
+
+            lprob = lprob.sum()
+            debug = False
+            if debug:
+                plot_vg_over_image(bb, image, caption=text, lprob=lprob)
+
+            return bb, lprob.cpu().numpy()
 
 
 def main():
