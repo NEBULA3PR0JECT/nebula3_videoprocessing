@@ -581,7 +581,7 @@ class VG_EXPERIMENT:
         img_ids_to_ontology = {}
         # Get all the image ids to the dict
         for img_id, _ in captions_data.items():
-            img_ids_to_ontology.update({img_id: {'objects': {'blip': {}}, 'captions': {'blip': {}}, 'persons': {'blip': {}}, 'scenes': {'blip': {}}}})
+            img_ids_to_ontology.update({img_id: {"objects": {"blip": {}}, "captions": {"blip": {}}, "persons": {"blip": {}}, "scenes": {"blip": {}}}})
 
         idx = 1
 
@@ -612,11 +612,16 @@ class VG_EXPERIMENT:
                 else:
                     print("Error.")
             idx +=1
+
+            # a = sorted(objects_data_dict.items(), key=lambda x: x[1], reverse=True)
+            # objects_data_dicts = [{key: val} for key,val in a]
+            
+            # objects_data_dicts = [{key,val} for key,val in objects_data_dict]
             # Insert all the ontologies to the current image id
-            img_ids_to_ontology[img_id]['objects']['blip'] = [(k, v) for k, v in objects_data_dict.items()]
+            img_ids_to_ontology[img_id]['objects']['blip'] = [{k: float(v)} for (k, v) in sorted(objects_data_dict.items(), key=lambda x: x[1], reverse=True)]
             img_ids_to_ontology[img_id]['captions']['blip'] = captions
-            img_ids_to_ontology[img_id]['persons']['blip'] = [(k, v) for k, v in persons_data_dict.items()]
-            img_ids_to_ontology[img_id]['scenes']['blip'] = [(k, v) for k, v in scenes_data_dict.items()]
+            img_ids_to_ontology[img_id]['persons']['blip'] = [{k: float(v)} for (k, v) in sorted(persons_data_dict.items(), key=lambda x: x[1], reverse=True)]
+            img_ids_to_ontology[img_id]['scenes']['blip'] = [{k: float(v)} for (k, v) in sorted(scenes_data_dict.items(), key=lambda x: x[1], reverse=True)]
 
 
             query = 'UPSERT { image_id: @image_id } INSERT  \
@@ -628,18 +633,17 @@ class VG_EXPERIMENT:
                             
             img_url = os.path.join('https://cs.stanford.edu/people/rak248/VG_100K', img_id + '.jpg')
             bind_vars = {
-                            'image_id': int(img_id),
-                            'global_objects': {'blip' : img_ids_to_ontology[img_id]['objects']['blip']},
-                            'global_captions': {'blip' : img_ids_to_ontology[img_id]['captions']['blip']},
-                            'global_persons': {'blip' : img_ids_to_ontology[img_id]['persons']['blip']},
-                            'global_scenes': {'blip' : img_ids_to_ontology[img_id]['scenes']['blip']},
-                            'url': img_url,
-                            'source': source
+                            "image_id": int(img_id),
+                            "global_objects": {"blip" : img_ids_to_ontology[img_id]['objects']['blip']},
+                            "global_captions": {"blip" : img_ids_to_ontology[img_id]['captions']['blip']},
+                            "global_persons": {"blip" : img_ids_to_ontology[img_id]['persons']['blip']},
+                            "global_scenes": {"blip" : img_ids_to_ontology[img_id]['scenes']['blip']},
+                            "url": img_url,
+                            "source": source
                             }
             # print(bind_vars)
             print(idx)
             self.db.aql.execute(query, bind_vars=bind_vars)
-            a=0
 
     
 
@@ -670,7 +674,6 @@ def main():
     persons_path = os.path.join(result_path_base, "results_blip_itc_persons_vg.csv")
     scenes_path = os.path.join(result_path_base, "results_blip_itc_scenes_vg.csv")
     ipc_path = "/storage/ipc_data/paragraphs_v1.json"
-    a=0
-    # vg_experiment.insert_vg_experiments_to_db(objects_path, captions_path, persons_path, scenes_path, ipc_path, db_name="nebula_playground")
+    vg_experiment.insert_vg_experiments_to_db(objects_path, captions_path, persons_path, scenes_path, ipc_path, db_name="nebula_playground")
 if __name__ == '__main__':
     main()
