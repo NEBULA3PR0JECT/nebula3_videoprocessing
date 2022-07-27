@@ -38,10 +38,18 @@ from clip_video_utils import ClipVideoUtils
 import argparse
 
 class NEBULA_SCENE_DETECTOR():
-    def __init__(self, use_ClipCap=False, use_OFA=False, use_nebula3=True):
+    def __init__(self, use_ClipCap=False, use_OFA=False, use_nebula3=True, debug=False):
         logging.basicConfig(format='%(asctime)s - %(message)s',
                             level=logging.INFO)
         # self.video_eval = NebulaVideoEvaluation()
+        self.adaptive_threshold = 3.0 #3.0
+        self.min_delta_hsv = 15.0
+        self.window_width = 2
+
+        self.debug = debug
+        if self.debug:
+            self.debug_all = list()
+
         self.video_utils = ClipVideoUtils()
         if use_nebula3:
             self.nre = MOVIE_DB()
@@ -66,18 +74,36 @@ class NEBULA_SCENE_DETECTOR():
                 video_manager = VideoManager([video_file])
                 scene_manager = SceneManager()
                 # scene_manager.add_detector(ContentDetector(threshold=30.0)) # HK was 30.0
-                scene_manager.add_detector(AdaptiveDetector(adaptive_threshold=3.0)) # HK was 30.0
+                scene_manager.add_detector(AdaptiveDetector(adaptive_threshold=self.adaptive_threshold, 
+                                            min_delta_hsv=self.min_delta_hsv, window_width=self.window_width)) # HK WAS 3.0
             # Improve processing speed by downscaling before processing.
-                video_manager.set_downscale_factor()
+                video_manager.set_downscale_factor() #No-op. Set downscale_factor in `SceneManager` instead.
             # Start the video manager and perform the scene detection.
                 video_manager.start()
-                scene_manager.detect_scenes(frame_source=video_manager)
+                scene_manager.detect_scenes(video=video_manager, show_progress=self.debug) #scene_manager.stats_manager.get_metrics(100, 'delta_hue')
                 scene_list = scene_manager.get_scene_list()
-                for i, scene in enumerate(scene_list):
-                    start_frame = scene[0].get_frames()
-                    stop_frame = scene[1].get_frames()
-                    scenes.append([start_frame,stop_frame])
-                # secnes is list of lists
+                
+                if self.debug:
+                    cut_list = scene_manager.get_cut_list()
+                    scene_manager.stats_manager.save_to_csv(csv_file=os.path.join('/notebooks/nebula3_playground', 
+                            os.path.basename(video_file).split('.')[0] + '_' +str(self.adaptive_threshold) + '_'+ str(self.window_width) + '_stats_manager.csv'), 
+                            base_timecode='FrameTimecode')
+                    if not cut_list:
+                        cut_list = [0, len(scene_manager.stats_manager._frame_metrics.items())]
+                    print("cut_list {}".format(cut_list))
+                    self.debug_all.append({os.path.basename(video_file).split('.')[0]: cut_list})
+                
+                if not scene_list:
+                    scene = [0, len(scene_manager.stats_manager._frame_metrics.items())]
+                    if self.debug:
+                        print("All movi 1 Scenes element: ", scenes)   
+                    scenes.append([scene[0], scene[1]]) 
+                else:
+                    for i, scene in enumerate(scene_list):
+                        start_frame = scene[0].get_frames()
+                        stop_frame = scene[1].get_frames()
+                        scenes.append([start_frame,stop_frame])
+                    # secnes is list of lists
                 print("Scenes elements: ", scenes)
         elif method == 'clip':
             # boundaries is list of tuples
@@ -854,10 +880,11 @@ def create_mdf_string_save_img(method, scene_element, file_name, scene_detector,
 def paperspace_playground():
     import datetime
     # base_folder = '/datasets/msrvtt'
-    base_folder = '/home/paperspace/data/videos'
-    outfolder = '/home/paperspace/data/mdfs'
+    base_folder = '/datasets/dataset/msr_vtt/videos' #'/home/paperspace/data/videos'
+    outfolder = '/notebooks/nebula3_playground' #'/datasets/dataset/msr_vtt/results'
 
     videos = os.listdir(base_folder)
+    videos = sorted(videos)
 
     scene_detector = NEBULA_SCENE_DETECTOR(use_ClipCap=False, use_OFA=False, use_nebula3=False)
 
@@ -886,7 +913,7 @@ def paperspace_playground():
         start_time = datetime.datetime.now()
         frame1_mdfs = scene_detector.detect_mdf(os.path.join(base_folder, video), scene_elements_adaptive, method='1frame')
         frame1_mdf_diff = (datetime.datetime.now() - start_time).total_seconds()
-
+        
         start_time = datetime.datetime.now()
         old_clip_mdfs = scene_detector.detect_mdf(os.path.join(base_folder, video), scene_elements_adaptive, method='meanshift')
         clip_mdfs = []
@@ -894,7 +921,6 @@ def paperspace_playground():
             clip_mdfs.append([mdf[0]])
 
         clip_mdf_diff = (datetime.datetime.now() - start_time).total_seconds()
-
 
         frames_to_save = scene_detector.video_utils.get_specific_frames(os.path.join(base_folder, video), clip_mdfs)
         for k, frame in enumerate(frames_to_save):
@@ -910,7 +936,6 @@ def paperspace_playground():
         adaptive_string = ''
         for scene_elem in scene_elements_adaptive:
             adaptive_string = adaptive_string + ' ' + str(scene_elem[0]) + '-' + str(scene_elem[1]) + ','
-
         clip_string = ''
         for scene_elem in scene_elements_clip:
             clip_string = clip_string + ' ' + str(scene_elem[0]) + '-' + str(scene_elem[1]) + ','
@@ -935,6 +960,12 @@ def paperspace_playground():
                         'mdf_laplacian': mdf_laplace_string,
                         'time_mdf_clip': str(clip_mdf_diff),
                          'time_mdf_laplacian': str(frame1_mdf_diff)})
+
+    if scene_detector.debug:
+        import pandas as pd
+        df = pd.DataFrame(scene_detector.debug_all)
+        df = df.transpose()
+        df.to_csv(os.path.join(outfolder, 'se_list' + str(scene_detector.adaptive_threshold) + '.csv'))
 
 
 
@@ -1306,6 +1337,7 @@ if __name__ == "__main__":
         # single_mdf_selection()
         # test_different_thresholds()
         paperspace_playground()
+
     else:
         main()
 
