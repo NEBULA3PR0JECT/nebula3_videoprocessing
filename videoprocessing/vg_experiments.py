@@ -653,23 +653,23 @@ class VG_EXPERIMENT:
             objects_data = open_csv(objects_path)
             attributes_data = open_csv(attributes_path)
 
-            object_image_ids = [{image_id[-1].replace(".jpg", ""): image_id[:-1]} for image_id in objects_data[1:]]
+            object_image_ids = [{image_id[-1].replace("tensor([", "").replace("])",""): image_id[:-1]} for image_id in objects_data[1:]]
 
             atrribute_image_ids = [{image_id[-1].replace("tensor([", "").replace("])",""): image_id[:-1]} for image_id in attributes_data[1:]]
 
             imgs_ids = {}
 
-            img_ids_blip_to_ontology, img_ids_clip_to_ontology = {}, {}
+            img_ids_objs_to_ontology, img_ids_atts_to_ontology = {}, {}
             # Get all the image ids to the dict
             for img_id_dict in object_image_ids:
                 img_id = list(img_id_dict.items())[0][0]
-                img_ids_blip_to_ontology.update({img_id: {"objects": {"blip": {"rois": list()}}}})
+                img_ids_objs_to_ontology.update({img_id: {"objects": {"clip": {"rois": list()}}}})
                 if img_id not in imgs_ids:
                     imgs_ids.update({img_id:''})
 
             for img_id_dict in atrribute_image_ids:
                 img_id = list(img_id_dict.items())[0][0]
-                img_ids_clip_to_ontology.update({img_id: {"attributes": {"clip": {"rois": list()}}}})
+                img_ids_atts_to_ontology.update({img_id: {"attributes": {"clip": {"rois": list()}}}})
                 if img_id not in imgs_ids:
                     imgs_ids.update({img_id:''})
 
@@ -678,8 +678,8 @@ class VG_EXPERIMENT:
                 img_id = list(img_id_dict.items())[0][0]
                 objects_and_confidences = list(zip(objects_data[0][:-2], img_id_dict[img_id][:-2]))
                 objects_and_confidences = [(k, float(v)) for (k, v) in sorted(objects_and_confidences, key=lambda x: x[1], reverse=True)]
-                roi = img_id_dict[img_id][-2]
-                img_ids_blip_to_ontology[img_id]['objects']['blip']['rois'].append({roi: objects_and_confidences})
+                roi = img_id_dict[img_id][-2].replace("tensor([", "").replace("])","")
+                img_ids_objs_to_ontology[img_id]['objects']['clip']['rois'].append({roi: objects_and_confidences})
 
 
             for img_id_dict in atrribute_image_ids:
@@ -687,7 +687,7 @@ class VG_EXPERIMENT:
                 attributes_and_confidences = list(zip(attributes_data[0][:-2], img_id_dict[img_id][:-2]))
                 attributes_and_confidences = [(k, float(v)) for (k, v) in sorted(attributes_and_confidences, key=lambda x: x[1], reverse=True)]
                 roi = img_id_dict[img_id][-2].replace("tensor([", "").replace("])","")
-                img_ids_clip_to_ontology[img_id]['attributes']['clip']['rois'].append({roi: attributes_and_confidences})
+                img_ids_atts_to_ontology[img_id]['attributes']['clip']['rois'].append({roi: attributes_and_confidences})
     
             imgs_ids = list(imgs_ids.keys())
             # Iterate over all images ids
@@ -702,39 +702,43 @@ class VG_EXPERIMENT:
             #                 } UPDATE {image_id: @image_id, url: @url, global_objects: @global_objects, global_captions: @global_captions,\
             #                     global_persons: @global_persons, global_scenes: @global_scenes, \
             #                     source: @source} IN s3_local_tokens1'
-            for idx, img in enumerate(imgs_ids):
+            for idx, img_id in enumerate(imgs_ids):
 
                 # Reset a fresh ROI dict every iteration
                 roi_dict = {
-                        'roi_id': idx,
-                        'bbox': [],
+                        'roi_id': 0,
+                        'bbox': '',
                         'bbox_source': '',
-                        'local_caption': {},
-                        'local_objects': {},
-                        'local_attributes': {}
+                        'local_caption': {'blip': {'none'}},
+                        'local_objects': {'clip': []},
+                        'local_attributes': {'clip': []}
                 }
+                rois_list = []
                 # Add objects & attributes ROIs
-                objects_rois = img_ids_blip_to_ontology[img_id]['objects']['blip']['rois']
-                attributes_rois = img_ids_clip_to_ontology[img_id]['attributes']['clip']['rois']
-                for obj_roi in objects_rois:
+                objects_rois = img_ids_objs_to_ontology[img_id]['objects']['clip']['rois']
+                attributes_rois = img_ids_atts_to_ontology[img_id]['attributes']['clip']['rois']
+                for ijx, obj_roi in enumerate(objects_rois):
+                    roi_dict_temp = roi_dict.copy()
+                    roi = list(obj_roi.keys())[0]
+                    roi_dict_temp['roi_id'] = ijx
+                    roi_dict_temp['bbox'] = roi
+                    roi_dict_temp['bbox_source'] = 'vg_gt'
+                    roi_dict_temp['local_caption'] = ''
+                    roi_dict_temp['local_objects']['clip'] = objects_rois[ijx][roi]
+                    roi_dict_temp['local_attributes']['clip'] = attributes_rois[ijx][roi]
+                    rois_list.append(roi_dict_temp)
 
 
 
                 query = 'UPSERT { image_id: @image_id } INSERT  \
-                    { image_id: @image_id, url: @url, global_objects: @global_objects, global_captions: @global_captions,\
-                                global_persons: @global_persons, global_scenes: @global_scenes, source: @source\
-                            } UPDATE {image_id: @image_id, url: @url, global_objects: @global_objects, global_captions: @global_captions,\
-                                global_persons: @global_persons, global_scenes: @global_scenes, \
-                                source: @source} IN s3_local_tokens1'
+                        { image_id: @image_id, roi: @roi, url: @url, source: @source \
+                            } UPDATE {image_id: @image_id, roi: @roi, url: @url, source: @source} \
+                                IN s3_local_tokens'
 
                 img_url = os.path.join('https://cs.stanford.edu/people/rak248/VG_100K', img_id + '.jpg')
                 bind_vars = {
                                 "image_id": int(img_id),
-                                "roi": int(img_id),
-                                "global_objects": {"blip" : img_ids_to_ontology[img_id]['objects']['blip']},
-                                "global_captions": {"blip" : img_ids_to_ontology[img_id]['captions']['blip']},
-                                "global_persons": {"blip" : img_ids_to_ontology[img_id]['persons']['blip']},
-                                "global_scenes": {"blip" : img_ids_to_ontology[img_id]['scenes']['blip']},
+                                "roi": rois_list,
                                 "url": img_url,
                                 "source": source
                                 }
@@ -764,7 +768,7 @@ def main():
     # file_path = "/notebooks/vg_output/results_blip_vg_relations_random.json"
     # vg_experiment.compute_average_relations(file_path)
     result_path_base = '/storage/results' #os.path.join(os.getcwd(), 'vg_output')
-    objects_path = os.path.join(result_path_base, "results_roi_det_vs_vg_min_h_blip_itc_60_min_w_60_objects.csv")
+    objects_path = os.path.join(result_path_base, "results_bottom_up_roi_det_vs_vg_min_h_clip_60_min_w_60_ontology_vg_objects.csv")
     attributes_path = os.path.join(result_path_base, "results_bottom_up_roi_det_vs_vg_min_h_clip_60_min_w_60_ontology_vg_attributes.csv")
     ipc_path = "/storage/ipc_data/paragraphs_v1.json"
     vg_experiment.insert_vg_local_experiments_to_db(objects_path, attributes_path, ipc_path, db_name="nebula_playground", source='visualgenome')
