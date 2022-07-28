@@ -618,10 +618,10 @@ class VG_EXPERIMENT:
             
             # objects_data_dicts = [{key,val} for key,val in objects_data_dict]
             # Insert all the ontologies to the current image id
-            img_ids_to_ontology[img_id]['objects']['blip'] = [{k: float(v)} for (k, v) in sorted(objects_data_dict.items(), key=lambda x: x[1], reverse=True)]
+            img_ids_to_ontology[img_id]['objects']['blip'] = [{"label": k, "score": float(v)} for (k, v) in sorted(objects_data_dict.items(), key=lambda x: x[1], reverse=True)]
             img_ids_to_ontology[img_id]['captions']['blip'] = captions
-            img_ids_to_ontology[img_id]['persons']['blip'] = [{k: float(v)} for (k, v) in sorted(persons_data_dict.items(), key=lambda x: x[1], reverse=True)]
-            img_ids_to_ontology[img_id]['scenes']['blip'] = [{k: float(v)} for (k, v) in sorted(scenes_data_dict.items(), key=lambda x: x[1], reverse=True)]
+            img_ids_to_ontology[img_id]['persons']['blip'] = [{"label": k, "score": float(v)} for (k, v) in sorted(persons_data_dict.items(), key=lambda x: x[1], reverse=True)]
+            img_ids_to_ontology[img_id]['scenes']['blip'] = [{"label": k, "score": float(v)} for (k, v) in sorted(scenes_data_dict.items(), key=lambda x: x[1], reverse=True)]
 
 
             query = 'UPSERT { image_id: @image_id } INSERT  \
@@ -645,7 +645,102 @@ class VG_EXPERIMENT:
             print(idx)
             self.db.aql.execute(query, bind_vars=bind_vars)
 
+    def insert_vg_local_experiments_to_db(self, objects_path, attributes_path, ipc_path, db_name="nebula_playground", source='visualgenome'):
+            self.nre.change_db(db_name)
+            self.db = self.nre.db
+            
+            ipc_data = open_json(ipc_path)
+            objects_data = open_csv(objects_path)
+            attributes_data = open_csv(attributes_path)
+
+            object_image_ids = [{image_id[-1].replace(".jpg", ""): image_id[:-1]} for image_id in objects_data[1:]]
+
+            atrribute_image_ids = [{image_id[-1].replace("tensor([", "").replace("])",""): image_id[:-1]} for image_id in attributes_data[1:]]
+
+            imgs_ids = {}
+
+            img_ids_blip_to_ontology, img_ids_clip_to_ontology = {}, {}
+            # Get all the image ids to the dict
+            for img_id_dict in object_image_ids:
+                img_id = list(img_id_dict.items())[0][0]
+                img_ids_blip_to_ontology.update({img_id: {"objects": {"blip": {"rois": list()}}}})
+                if img_id not in imgs_ids:
+                    imgs_ids.update({img_id:''})
+
+            for img_id_dict in atrribute_image_ids:
+                img_id = list(img_id_dict.items())[0][0]
+                img_ids_clip_to_ontology.update({img_id: {"attributes": {"clip": {"rois": list()}}}})
+                if img_id not in imgs_ids:
+                    imgs_ids.update({img_id:''})
+
+            # Get all the ROIs with their corresponding objects
+            for img_id_dict in object_image_ids:
+                img_id = list(img_id_dict.items())[0][0]
+                objects_and_confidences = list(zip(objects_data[0][:-2], img_id_dict[img_id][:-2]))
+                objects_and_confidences = [(k, float(v)) for (k, v) in sorted(objects_and_confidences, key=lambda x: x[1], reverse=True)]
+                roi = img_id_dict[img_id][-2]
+                img_ids_blip_to_ontology[img_id]['objects']['blip']['rois'].append({roi: objects_and_confidences})
+
+
+            for img_id_dict in atrribute_image_ids:
+                img_id = list(img_id_dict.items())[0][0]
+                attributes_and_confidences = list(zip(attributes_data[0][:-2], img_id_dict[img_id][:-2]))
+                attributes_and_confidences = [(k, float(v)) for (k, v) in sorted(attributes_and_confidences, key=lambda x: x[1], reverse=True)]
+                roi = img_id_dict[img_id][-2].replace("tensor([", "").replace("])","")
+                img_ids_clip_to_ontology[img_id]['attributes']['clip']['rois'].append({roi: attributes_and_confidences})
     
+            imgs_ids = list(imgs_ids.keys())
+            # Iterate over all images ids
+            # Insert all the ontologies to the current image id
+            # img_ids_to_ontology[img_id]['objects']['blip'] = [{k: float(v)} for (k, v) in sorted(objects_data_dict.items(), key=lambda x: x[1], reverse=True)]
+            # img_ids_to_ontology[img_id]['captions']['blip'] = captions
+            # img_ids_to_ontology[img_id]['persons']['blip'] = [{k: float(v)} for (k, v) in sorted(persons_data_dict.items(), key=lambda x: x[1], reverse=True)]
+            # img_ids_to_ontology[img_id]['scenes']['blip'] = [{k: float(v)} for (k, v) in sorted(scenes_data_dict.items(), key=lambda x: x[1], reverse=True)]
+            # query = 'UPSERT { image_id: @image_id } INSERT  \
+            #         { image_id: @image_id, url: @url, global_objects: @global_objects, global_captions: @global_captions,\
+            #                     global_persons: @global_persons, global_scenes: @global_scenes, source: @source\
+            #                 } UPDATE {image_id: @image_id, url: @url, global_objects: @global_objects, global_captions: @global_captions,\
+            #                     global_persons: @global_persons, global_scenes: @global_scenes, \
+            #                     source: @source} IN s3_local_tokens1'
+            for idx, img in enumerate(imgs_ids):
+
+                # Reset a fresh ROI dict every iteration
+                roi_dict = {
+                        'roi_id': idx,
+                        'bbox': [],
+                        'bbox_source': '',
+                        'local_caption': {},
+                        'local_objects': {},
+                        'local_attributes': {}
+                }
+                # Add objects & attributes ROIs
+                objects_rois = img_ids_blip_to_ontology[img_id]['objects']['blip']['rois']
+                attributes_rois = img_ids_clip_to_ontology[img_id]['attributes']['clip']['rois']
+                for obj_roi in objects_rois:
+
+
+
+                query = 'UPSERT { image_id: @image_id } INSERT  \
+                    { image_id: @image_id, url: @url, global_objects: @global_objects, global_captions: @global_captions,\
+                                global_persons: @global_persons, global_scenes: @global_scenes, source: @source\
+                            } UPDATE {image_id: @image_id, url: @url, global_objects: @global_objects, global_captions: @global_captions,\
+                                global_persons: @global_persons, global_scenes: @global_scenes, \
+                                source: @source} IN s3_local_tokens1'
+
+                img_url = os.path.join('https://cs.stanford.edu/people/rak248/VG_100K', img_id + '.jpg')
+                bind_vars = {
+                                "image_id": int(img_id),
+                                "roi": int(img_id),
+                                "global_objects": {"blip" : img_ids_to_ontology[img_id]['objects']['blip']},
+                                "global_captions": {"blip" : img_ids_to_ontology[img_id]['captions']['blip']},
+                                "global_persons": {"blip" : img_ids_to_ontology[img_id]['persons']['blip']},
+                                "global_scenes": {"blip" : img_ids_to_ontology[img_id]['scenes']['blip']},
+                                "url": img_url,
+                                "source": source
+                                }
+                # print(bind_vars)
+                print(idx)
+                self.db.aql.execute(query, bind_vars=bind_vars)    
 
 def main():
     vg_experiment = VG_EXPERIMENT()
@@ -668,12 +763,17 @@ def main():
     # vg_experiment.compute_average_relations(file_path)
     # file_path = "/notebooks/vg_output/results_blip_vg_relations_random.json"
     # vg_experiment.compute_average_relations(file_path)
-    result_path_base = os.path.join(os.getcwd(), 'vg_output')
-    objects_path = os.path.join(result_path_base, "results_clip_vg.csv")
-    captions_path = os.path.join(result_path_base, "results_captions_blip_vg.json")
-    persons_path = os.path.join(result_path_base, "results_blip_itc_persons_vg.csv")
-    scenes_path = os.path.join(result_path_base, "results_blip_itc_scenes_vg.csv")
+    result_path_base = '/storage/results' #os.path.join(os.getcwd(), 'vg_output')
+    objects_path = os.path.join(result_path_base, "results_roi_det_vs_vg_min_h_blip_itc_60_min_w_60_objects.csv")
+    attributes_path = os.path.join(result_path_base, "results_bottom_up_roi_det_vs_vg_min_h_clip_60_min_w_60_ontology_vg_attributes.csv")
     ipc_path = "/storage/ipc_data/paragraphs_v1.json"
-    vg_experiment.insert_vg_experiments_to_db(objects_path, captions_path, persons_path, scenes_path, ipc_path, db_name="nebula_playground")
+    vg_experiment.insert_vg_local_experiments_to_db(objects_path, attributes_path, ipc_path, db_name="nebula_playground", source='visualgenome')
+    # result_path_base = os.path.join(os.getcwd(), 'vg_output')
+    # objects_path = os.path.join(result_path_base, "results_clip_vg.csv")
+    # captions_path = os.path.join(result_path_base, "results_captions_blip_vg.json")
+    # persons_path = os.path.join(result_path_base, "results_blip_itc_persons_vg.csv")
+    # scenes_path = os.path.join(result_path_base, "results_blip_itc_scenes_vg.csv")
+    # ipc_path = "/storage/ipc_data/paragraphs_v1.json"
+    # vg_experiment.insert_vg_experiments_to_db(objects_path, captions_path, persons_path, scenes_path, ipc_path, db_name="nebula_playground")
 if __name__ == '__main__':
     main()
