@@ -90,6 +90,8 @@ class ClipVideoUtils:
                 with torch.no_grad():
                     img = self.preprocess(Image.fromarray(frame)).unsqueeze(0).to(self.device)
                     embeddings = self.model.encode_image(img)
+                    if isinstance(embeddings, torch.Tensor):
+                        embeddings = embeddings.cpu().numpy()
                     embeddings = embeddings / np.linalg.norm(embeddings)
                     embedding_array = np.append(embedding_array, embeddings, axis=0)
                     if init == 0:
