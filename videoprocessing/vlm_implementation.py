@@ -6,7 +6,7 @@ import requests
 import torch
 
 from transformers import CLIPProcessor, CLIPModel
-from models.blip_itm import blip_itm
+from nebula3_videoprocessing.videoprocessing.models.blip_itm import blip_itm
 from torchvision import transforms
 from torchvision.transforms.functional import InterpolationMode
 

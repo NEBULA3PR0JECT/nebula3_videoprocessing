@@ -3,7 +3,7 @@ import requests
 import torch
 from torchvision import transforms
 from torchvision.transforms.functional import InterpolationMode
-from models.blip import blip_decoder
+from nebula3_videoprocessing.videoprocessing.models.blip import blip_decoder
 
 class BLIP_Captioner():
 
