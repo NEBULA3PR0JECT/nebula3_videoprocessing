@@ -937,15 +937,6 @@ def paperspace_playground():
                          'time_mdf_laplacian': str(frame1_mdf_diff)})
 
 
-
-
-
-
-
-
-
-
-
 def test_different_thresholds():
     base_folder = '/notebooks/dataset' #'/home/hanoch/dataset/msr_vtt'
     # scenes = ["2054_Harry_Potter_and_the_prisoner_of_azkaban/2054_Harry_Potter_and_the_prisoner_of_azkaban_01.03.14.878-01.03.15.557.avi",
