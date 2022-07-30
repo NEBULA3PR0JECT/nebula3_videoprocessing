@@ -36,6 +36,7 @@ from clipcap_nebula import ClipCap
 
 from clip_video_utils import ClipVideoUtils
 import argparse
+import datetime
 
 class NEBULA_SCENE_DETECTOR():
     def __init__(self, use_ClipCap=False, use_OFA=False, use_nebula3=True, debug=False):
@@ -50,7 +51,7 @@ class NEBULA_SCENE_DETECTOR():
         if self.debug:
             self.debug_all = list()
 
-        self.video_utils = ClipVideoUtils()
+        self.video_utils = ClipVideoUtils(batch_size=128)
         if use_nebula3:
             self.nre = MOVIE_DB()
             self.playground_instance = PLAYGROUND_DB()
@@ -293,7 +294,7 @@ class NEBULA_SCENE_DETECTOR():
         #     scene_mdfs.append(middle_frame)
         #     scene_mdfs.append(stop_frame - 2)
         #     mdfs.append(scene_mdfs)
-        return(mdfs)
+        return (mdfs)
 
 
     def save_mdfs_to_jpg(self, full_path, mdfs, save_path="/dataset/lsmdc/mdfs_of_20_clips/"):
@@ -877,8 +878,60 @@ def create_mdf_string_save_img(method, scene_element, file_name, scene_detector,
 
     return mdf_string
 
+def paperspace_playground_mk():
+    base_folder = '/home/paperspace/data/videos'
+    out_folder = '/home/paperspace/data/mdfs'
+    videos = os.listdir(base_folder)
+    videos = sorted(videos)
+
+    scene_detector = NEBULA_SCENE_DETECTOR(use_ClipCap=False, use_OFA=False, use_nebula3=False)
+    out_file_csv = open(os.path.join(out_folder, 'result_csv5.csv'), 'w')
+    fieldnames = ['movie name', 'scenes_adaptive', 'mdf_clip', 'time_per_frame']
+    writer = csv.DictWriter(out_file_csv, fieldnames=fieldnames)
+    writer.writerow({'movie name': 'movie name',
+                     'scenes_adaptive': 'scenes_adaptive',
+                     'mdf_clip': 'mdf_clip',
+                     'time_per_frame': 'time_per_frame'})
+
+    for video in videos:
+        start_time = datetime.datetime.now()
+        scene_elements_adaptive = scene_detector.detect_scene_elements(os.path.join(base_folder, video))
+        adaptive_diff = (datetime.datetime.now() - start_time).total_seconds()
+
+        # start_time = datetime.datetime.now()
+        # scene_elements_clip = scene_detector.detect_scene_elements(os.path.join(base_folder, video), method='clip')
+        # clip_diff = (datetime.datetime.now() - start_time).total_seconds()
+
+        start_time = datetime.datetime.now()
+        old_clip_mdfs = scene_detector.detect_mdf(os.path.join(base_folder, video), scene_elements_adaptive,
+                                                  method='meanshift')
+        clip_diff = (datetime.datetime.now() - start_time).total_seconds()
+
+        num_frames = scene_elements_adaptive[-1][-1]
+
+        adaptive_string = ''
+        for scene_elem in scene_elements_adaptive:
+            adaptive_string = adaptive_string + ' ' + str(scene_elem[0]) + '-' + str(scene_elem[1]) + ','
+
+        mdf_clip_string = ''
+        save_mdfs = []
+        for mdfs in old_clip_mdfs:
+            for mdf in mdfs:
+                mdf_clip_string = mdf_clip_string + ' ' + str(mdf) + ','
+                save_mdfs.append(mdf)
+            mdf_clip_string = mdf_clip_string + ';'
+
+        frames_to_save = scene_detector.video_utils.get_specific_frames(os.path.join(base_folder, video), [save_mdfs])
+        for k, frame in enumerate(frames_to_save):
+            imgname = video[:video.find('.')] + f'_clipmdf_{save_mdfs[k]:04}.jpg'
+            ret = cv2.imwrite(os.path.join(out_folder, imgname), frame)
+
+        writer.writerow({'movie name': video[:video.find('.')],
+                         'scenes_adaptive': adaptive_string,
+                         'mdf_clip': mdf_clip_string,
+                         'time_per_frame': f'{clip_diff/num_frames:4.3f}'})
+
 def paperspace_playground():
-    import datetime
     # base_folder = '/datasets/msrvtt'
     base_folder = '/datasets/dataset/msr_vtt/videos' #'/home/paperspace/data/videos'
     outfolder = '/notebooks/nebula3_playground' #'/datasets/dataset/msr_vtt/results'
@@ -1327,7 +1380,7 @@ if __name__ == "__main__":
         # test_mdf_selection()
         # single_mdf_selection()
         # test_different_thresholds()
-        paperspace_playground()
+        paperspace_playground_mk()
 
     else:
         main()

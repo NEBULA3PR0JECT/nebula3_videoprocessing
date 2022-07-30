@@ -159,7 +159,7 @@ class ClipVideoUtils:
 
         with torch.no_grad():
             if self.batch_size > 0:
-                ind = batch_cnt % self.batch_size
+                ind = (batch_cnt-1) % self.batch_size
                 if ind != self.batch_size - 1:
                     batch_array = batch_array[:ind, :, :, :].to(self.device)
                     embeddings = self.model.encode_image(batch_array).cpu()
