@@ -1,15 +1,16 @@
-from nebula3_videoprocessing.videoprocessing.models.med import BertConfig, BertModel
+from videoprocessing.models.med import BertConfig, BertModel
 from transformers import BertTokenizer
 
 import torch
 from torch import nn
 import torch.nn.functional as F
-
-from nebula3_videoprocessing.videoprocessing.models.blip import create_vit, init_tokenizer, load_checkpoint
-
+import os
+from videoprocessing.models.blip import create_vit, init_tokenizer, load_checkpoint
+script_dir = os.path.dirname(__file__)
+config_path = os.path.join(script_dir, "med_config.json")
 class BLIP_ITM(nn.Module):
     def __init__(self,                 
-                 med_config = 'nebula3_videoprocessing/videoprocessing/configs/med_config.json',  
+                 med_config = config_path,  
                  image_size = 384,
                  vit = 'base',
                  vit_grad_ckpt = False,

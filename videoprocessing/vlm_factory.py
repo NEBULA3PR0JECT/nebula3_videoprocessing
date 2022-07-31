@@ -1,5 +1,6 @@
-from nebula3_videoprocessing.videoprocessing.vlm_implementation import ClipVlmImplementation, BlipItcVlmImplementation, BlipItmVlmImplementation
-from nebula3_videoprocessing.videoprocessing.utils.singleton import Singleton
+
+from videoprocessing.vlm_implementation import ClipVlmImplementation, BlipItcVlmImplementation, BlipItmVlmImplementation
+from videoprocessing.utils.singleton import Singleton
 
 class VlmFactory:
     _creators = {}

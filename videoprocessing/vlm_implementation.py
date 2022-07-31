@@ -1,12 +1,12 @@
-from nebula3_videoprocessing.videoprocessing.vlm_interface import VlmInterface
-from nebula3_videoprocessing.videoprocessing.utils.config import config
+from videoprocessing.vlm_interface import VlmInterface
+from videoprocessing.utils.config import config
 import typing
 from PIL import Image
 import requests
 import torch
 
 from transformers import CLIPProcessor, CLIPModel
-from nebula3_videoprocessing.videoprocessing.models.blip_itm import blip_itm
+from videoprocessing.models.blip_itm import blip_itm
 from torchvision import transforms
 from torchvision.transforms.functional import InterpolationMode
 
@@ -177,5 +177,5 @@ def main():
 
 
 if __name__ == "__main__":
-    # main()
-    pass
+    main()
+    # pass
