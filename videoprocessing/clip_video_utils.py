@@ -1,3 +1,5 @@
+import os.path
+
 import torch
 import clip
 import numpy as np
@@ -11,14 +13,23 @@ class ClipVideoUtils:
     """
     The class provides a number of utils for CLIP based video processing
     """
-    def __init__(self, model_name='RN50x4'):
+    def __init__(self, model_name='RN50x4', batch_size=1024):
+        """
+        The optimal batch size depends on the GPU. If CPU, it's zero
+        :param model_name:
+        :param batch_size:
+        """
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.model, self.preprocess = clip.load(model_name, device=self.device)
         self.model_res = 640
+        self.img_res = 288
+        self.batch_size = batch_size if torch.cuda.is_available() else 0
         if model_name == 'ViT-B/32':
             self.model_res = 512
+            self.img_res = 224
         if model_name == 'ViT-L/14':
             self.model_res = 768
+            self.img_res = 224
 
     def is_sharp(self, color_img, blur_threshold=100):
         """
@@ -65,6 +76,34 @@ class ClipVideoUtils:
 
         return ret_boundaries, good_frame_len
 
+    def preprocess_movies(self, movie_name):
+        cap = cv.VideoCapture(movie_name)
+        ret, frame = cap.read()
+        frame = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
+        # embedding_array = np.zeros((0, self.model_res))
+        frame_num = 0
+        if self.batch_size > 0:
+            batch_array = torch.zeros(self.batch_size, 3, self.img_res, self.img_res)
+        while cap.isOpened() and ret:
+            with torch.no_grad():
+                if self.batch_size > 0:
+                    img = self.preprocess(Image.fromarray(frame)).unsqueeze(0)
+                    ind = frame_num % self.batch_size
+                    batch_array[ind, :] = img
+                    if ind == self.batch_size - 1:
+                        batch_array = batch_array.to(self.device)
+                        embeddings = self.model.encode_image(batch_array)
+                else:
+                    img = self.preprocess(Image.fromarray(frame)).unsqueeze(0).to(self.device)
+                    embeddings = self.model.encode_image(img)
+                pass
+            ret, frame = cap.read()
+            frame_num = frame_num + 1
+            if frame is not None:
+                frame = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
+
+        return frame_num
+
     def get_embedding_diffs(self, movie_name, start_time=-1, end_time=10000000, frame_or_time=1):
         """
         Given the movie name and the start / end time, return the CLIP embedding differeneces
@@ -75,9 +114,9 @@ class ClipVideoUtils:
         :return:
         """
         cap = cv.VideoCapture(movie_name)
-        init = 0
-        old_embeddings = None
-        diff_list = []
+        # init = 0
+        # old_embeddings = None
+        # diff_list = []
         ret, frame = cap.read()
         frame = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
         embedding_array = np.zeros((0, self.model_res))
@@ -85,25 +124,47 @@ class ClipVideoUtils:
         fps = cap.get(cv.CAP_PROP_FPS)
         if frame_or_time == 0:
             fps = 1
+        batch_cnt = 0
+        if self.batch_size > 0:
+            batch_array = torch.zeros(self.batch_size, 3, self.img_res, self.img_res)
         while cap.isOpened() and ret:
             if (frame_num >= start_time * fps) and (frame_num < end_time * fps):
                 with torch.no_grad():
-                    img = self.preprocess(Image.fromarray(frame)).unsqueeze(0).to(self.device)
-                    embeddings = self.model.encode_image(img)
-                    if isinstance(embeddings, torch.Tensor):
-                        embeddings = embeddings.cpu().numpy()
-                    embeddings = embeddings / np.linalg.norm(embeddings)
-                    embedding_array = np.append(embedding_array, embeddings, axis=0)
-                    if init == 0:
-                        init = 1
+                    if self.batch_size > 0:
+                        img = self.preprocess(Image.fromarray(frame)).unsqueeze(0)
+                        ind = batch_cnt % self.batch_size
+                        batch_array[ind, :] = img
+                        if ind == self.batch_size - 1:
+                            batch_array = batch_array.to(self.device)
+                            embeddings = self.model.encode_image(batch_array).cpu()
+                            embeddings = embeddings / np.linalg.norm(embeddings, axis=1)[:, None]
+                            embedding_array = np.append(embedding_array, embeddings, axis=0)
                     else:
-                        diff = embeddings - old_embeddings
-                        diff_list.append((diff * diff).sum())
-                    old_embeddings = embeddings
+                        img = self.preprocess(Image.fromarray(frame)).unsqueeze(0).to(self.device)
+                        embeddings = self.model.encode_image(img)
+                        embeddings = embeddings / np.linalg.norm(embeddings)
+                        embedding_array = np.append(embedding_array, embeddings, axis=0)
+                    # The code below computes embedding differences
+                    # if init == 0:
+                    #     init = 1
+                    # else:
+                    #     diff = embeddings - old_embeddings
+                    #     diff_list.append((diff * diff).sum())
+                    # old_embeddings = embeddings
+                    batch_cnt = batch_cnt + 1
             frame_num = frame_num + 1
             ret, frame = cap.read()
             if frame is not None:
                 frame = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
+
+        with torch.no_grad():
+            if self.batch_size > 0:
+                ind = (batch_cnt-1) % self.batch_size
+                if ind != self.batch_size - 1:
+                    batch_array = batch_array[:ind, :, :, :].to(self.device)
+                    embeddings = self.model.encode_image(batch_array).cpu()
+                    embeddings = embeddings / np.linalg.norm(embeddings, axis=1)[:, None]
+                    embedding_array = np.append(embedding_array, embeddings, axis=0)
 
         return embedding_array, fps
 
@@ -270,3 +331,24 @@ class ClipVideoUtils:
                 pass
 
         return np.array(ret_list)
+
+import time
+def clip_performance_test():
+    folder = '/home/paperspace/data/videos'
+    movies = ['video1077.mp4', 'video3773.mp4', 'video9902.mp4']
+    # clip_utils = ClipVideoUtils('ViT-L/14')
+    # clip_utils = ClipVideoUtils('ViT-B/32')
+    clip_utils = ClipVideoUtils(batch_size=128)
+    for movie in movies:
+        movie_name = os.path.join(folder, movie)
+        st = time.process_time()
+        embedding_array, fps = clip_utils.get_embedding_diffs(movie_name)
+        n_frames = embedding_array.shape[0]
+        # n_frames = clip_utils.preprocess_movies(movie_name)
+        et = time.process_time()
+        res = (et - st) / n_frames
+        print(' Time for clip computing ', movie, ': ', res)
+        break
+
+if __name__ == "__main__":
+    clip_performance_test()
